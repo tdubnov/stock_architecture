@@ -419,10 +419,10 @@ class TradeStationClient:
         """
 
         # Calculate the token expire time.
-        token_exp = time.time() >= self.state['access_token_expires_at']
+        token_exp = self.state['access_token_expires_at'] - time.time()
 
         # if the time to expiration is less than or equal to 0, return 0.
-        if not self.state['refresh_token'] or token_exp:
+        if not self.state['refresh_token'] or token_exp <= 0:
             token_exp = 0
         else:
             token_exp = int(token_exp)
