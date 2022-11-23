@@ -128,7 +128,7 @@ class TradeStationData(bt.feed.DataBase):
                 return
 
             print('Stream quotes stopped')
-                return True
+            return True
 
     def stop(self):
         pass
