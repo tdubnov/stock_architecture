@@ -60,8 +60,22 @@ class MyStrategy(bt.Strategy):
             version=details['Version'],
             paper_trading=paper
         )
-        self.account_name = [account['Name'] for account in self.ts_client.get_accounts(details['Username'])
+
+        self.trade_station = TradeStation(client='Paper', symbols=details['Symbols'],
+                                          paper=True, interval=1, unit='Minute', session='USEQPreAndPost')
+
+        self.account_name = [account['Name'] for account in self.trade_client.get_accounts(details['Username'])
                              if account['TypeDescription'] == details['AccountType']][0]
+
+        cred = credentials.Certificate('./firestore_key.json')
+        initialize_app(cred)
+        self.db = firestore.client().collection(self.trade_station.account_name)
+
+        self.trade_history = pd.DataFrame(columns=TRADE_HISTORY_COLUMNS + ["latest_update"])
+        self.temp_trade_history = {}
+        pqdm(self.db.list_documents(), self.get_document_info, n_jobs=10)
+        self.trade_history = pd.DataFrame.from_dict(self.temp_trade_history, orient='index', columns=TRADE_HISTORY_COLUMNS + ["latest_update"])
+        self.trade_history = self.trade_history.sort_values(by='purchase_time')
 
     def next(self):
 
@@ -78,6 +92,28 @@ class MyStrategy(bt.Strategy):
         else: 
 
             if quantity == 0:
+
+                open_trades = self.trade_history[(self.trade_history.symbol == symbol) & (self.trade_history.status == "own")]
+
+
+                if open_trades.empty:
+                    return
+
+                sell_prices = (1 + open_trades.sell_threshold) * open_trades.purchase_price
+
+                new_trades_above_threshold = open_trades.loc[(sell_prices <= curr_price) & ~open_trades.above_threshold]
+                for trade_id in new_trades_above_threshold.index:
+                    self.trade_history.loc[trade_id, 'above_threshold'] = True
+                    self.db.document(symbol).collection("trade_history").document(trade_id).set(
+                        {"above_threshold": True}, merge=True)
+
+                sell_trades = open_trades.loc[self.trade_history.above_threshold]
+
+                if sell_trades.empty:
+
+                    return
+
+                qty = sell_trades.quantity.sum()
 
                 self.trade_client.place_order(account_key=self.account_name, symbol=symbol, trade_action='SELL',
                                                   quantity=qty, order_type="Market", duration="DAY")
