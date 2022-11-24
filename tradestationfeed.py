@@ -13,7 +13,7 @@ from helper import create_logger
 import sys
 import firebase_admin
 from firebase_admin import credentials, firestore
-logger = create_logger(file=f'{sys.argv[1].replace(" ", "_")}_log.log')
+#logger = create_logger(file=f'{sys.argv[1].replace(" ", "_")}_log.log')
 
 import schedule
 from copy import deepcopy
@@ -58,7 +58,7 @@ class TradeStationData(bt.feed.DataBase):
         
 
     def start(self):
-        logger.addHandler(self.handler)
+        #logger.addHandler(self.handler)
 
 
         catchable_signals = set(signal.Signals) - {signal.CTRL_C_EVENT, signal.CTRL_BREAK_EVENT}
@@ -88,7 +88,7 @@ class TradeStationData(bt.feed.DataBase):
             try:
                 time_till_open = self._time_to_open()
                 if time_till_open.total_seconds() > 0:
-                    logger.info(f'Stream quotes thread sleeping for {time_till_open}')
+                    #logger.info(f'Stream quotes thread sleeping for {time_till_open}')
                     sleep(time_till_open.total_seconds())
 
                 with self.trade_station.ts_client.stream_quotes(list(symbol)) as stream:
@@ -120,11 +120,11 @@ class TradeStationData(bt.feed.DataBase):
 
                         return True
             except requests.exceptions.ChunkedEncodingError:
-                logger.warning(f'Stream quotes chunked encoding error')
+                #logger.warning(f'Stream quotes chunked encoding error')
                 return
 
             except Exception:
-                logger.exception(f"Exception in stream quotes")
+                #logger.exception(f"Exception in stream quotes")
                 return
 
             print('Stream quotes stopped')
@@ -136,92 +136,71 @@ class TradeStationData(bt.feed.DataBase):
     def islive(self):
         return True
 
-
-class MyStrategy(bt.Strategy):
-
-
+class Datas():
     params = (
         ('symbol', 'a')
         )
-    qty_bought = 0
-    qty_sold = 0
-    threshold_keep = 0
-    MyStrategy.budget = Budget()
-    MyStrategy.temp_trade_history = {}
-    MyStrategy.temp_order_history = {}
-    MyStrategy.trade_history = pd.DataFrame(columns=TRADE_HISTORY_COLUMNS + ["latest_update"])
-    MyStrategy.sell_trades = pd.DataFrame(columns=TRADE_HISTORY_COLUMNS + ["latest_update"])
-    MyStrategy.order_history = pd.DataFrame(columns=ORDER_HISTORY_COLUMNS)
+    cred = credentials.Certificate("/home/ubuntu/Documents/stock_architecture-new/firestore_key.json")
+    firebase_admin.initialize_app(cred)
+
     def __init__(self):
-        cred = credentials.Certificate("./firestore_key.json'")
-        firebase_admin.initialize_app(cred)
+        self.budget = Budget()
+        self.temp_trade_history = {}
+        self.temp_order_history = {}
         self.trade_station = TradeStation(client='Paper', paper=True)
+        self.trade_history = pd.DataFrame(columns=TRADE_HISTORY_COLUMNS + ["latest_update"])
+        self.sell_trades = pd.DataFrame(columns=TRADE_HISTORY_COLUMNS + ["latest_update"])
+        self.order_history = pd.DataFrame(columns=ORDER_HISTORY_COLUMNS)
         self.db = firestore.client().collection(self.trade_station.account_name)
         self.read_db()
 
+
+    def check_buy(self):
+        import random
+        quantity = random.randint(0, 3)
+        threshold = random.uniform(0, 1/3)
+
+        if quantity == 0:
+            return 0
+
+        response = self.trade_station.submit_market_order(symbol=symbol, qty=quantity, order_type="BUY")
+
+        if response:
+
+            order_id = response["OrderID"]
+
+            status = "purchase_ordered"
+            self.budget.update_remaining_budget(-self.data.close*quantity, self.trade_station)
+
+            self.order_history.loc[order_id] = [symbol, quantity, "buy", None, self.data.datetime.time(0), None, self.data.close, status]
+
+            self.trade_history.loc[order_id] = [symbol, quantity, threshold, self.data.datetime.time(0),
+                                                None, curr_price, 0, status, False, self.data.datetime.time(0)]
+
+        return quantity
+
     def read_db(self):
+
         print('Reading db')
         budget_info = self.db.document("budget").get().to_dict()
-        MyStrategy.budget.max_budget = budget_info["max_budget"]
-        MyStrategy.budget.remaining_budget = budget_info["remaining_budget"]
-        MyStrategy.budget.starting_budget = budget_info["starting_budget"]
+        self.budget.max_budget = budget_info["max_budget"]
+        self.budget.remaining_budget = budget_info["remaining_budget"]
+        self.budget.starting_budget = budget_info["starting_budget"]
 
         pqdm(self.db.list_documents(), self.get_document_info, n_jobs=10)
-        MyStrategy.trade_history = pd.DataFrame.from_dict(MyStrategy.temp_trade_history, orient='index', columns=TRADE_HISTORY_COLUMNS + ["latest_update"])
-        MyStrategy.order_history = pd.DataFrame.from_dict(MyStrategy.temp_order_history, orient='index', columns=ORDER_HISTORY_COLUMNS)
+        self.trade_history = pd.DataFrame.from_dict(self.temp_trade_history, orient='index', columns=TRADE_HISTORY_COLUMNS + ["latest_update"])
+        self.order_history = pd.DataFrame.from_dict(self.temp_order_history, orient='index', columns=ORDER_HISTORY_COLUMNS)
         print(f'Finished reading db:'            
               f'\n\nTrade history from DB:'
-              f'\n{MyStrategy.trade_history.to_string()}'
+              f'\n{self.trade_history.to_string()}'
                 
               f'\n\nOrder history from DB:'
-              f'\n{MyStrategy.order_history.to_string()}')
-        MyStrategy.trade_history = MyStrategy.trade_history.sort_values(by='purchase_time')
-      
-    def get_document_info(self, document):
-        if document.id == 'budget':  # or document.id not in symbols:
-            return
+              f'\n{self.order_history.to_string()}')
+        self.trade_history = self.trade_history.sort_values(by='purchase_time')
 
-        for trade in document.collection("trade_history").list_documents():
-            info = trade.get().to_dict()
-            quantity = info["quantity"]
-            sell_threshold = info["sell_threshold"]
-            purchase_time = info["purchase_time"].astimezone(TIMEZONE)
-            sold_time = info["sold_time"].astimezone(TIMEZONE) if "sold_time" in info else None
-            latest_update = info["latest_update"].astimezone(TIMEZONE)
 
-            purchase_price = info["purchase_filled_price"]
-            sold_price = info.get("sold_filled_price", 0)
-            status = info["status"]
-            above_threshold = info.get("above_threshold", False)
-            try:
-                row = {'symbol': document.id, 'quantity': quantity, 'sell_threshold': sell_threshold,
-                       'purchase_time': purchase_time, 'sold_time': sold_time, 'purchase_price': purchase_price,
-                       'sold_price': sold_price, 'status': status, 'above_threshold': above_threshold,
-                       'latest_update': latest_update}
-                MyStrategy.temp_trade_history[trade.id] = row
-
-            except Exception as e:
-                logger.exception(f"Error reading Trade History of {document.id}:{trade.id}")
-
-        for order in document.collection("order_history").list_documents():
-            try:
-                info = order.get().to_dict()
-                quantity = info["quantity"]
-                order_type = info["type"]
-                opened_time = None if "opened_time" not in info else info["opened_time"].astimezone(TIMEZONE)
-                closed_time = None if "closed_time" not in info else info["closed_time"].astimezone(TIMEZONE)
-                trade_ids = info.get("trade_ids", [])
-                price = info["filled_price"]
-                status = info["status"]
-
-                row = {'symbol': document.id, 'quantity': quantity, 'type': order_type, 'trade_ids': trade_ids,
-                       'opened_time': opened_time, 'closed_time': closed_time, 'price': price, 'status': status}
-                self.temp_order_history[order.id] = row
-
-            except Exception as e:
-                logger.exception(f"Error reading Order History of {document.id}:{order.id}")
-          
     def synchronize_broker_with_db(self):
+
         self.trade_station.get_account_updates()
 
         for order_id, curr_order in sorted(self.trade_station.orders.items(), key=lambda k_v: k_v[1]["OpenedTime"]):
@@ -248,10 +227,10 @@ class MyStrategy(bt.Strategy):
                 order_status = f"INVALID_STATUS: {status}"
 
             symbol_latest_status = list(self.db.document(symbol).collection("trade_history").list_documents())[-1].get().to_dict()['status']
-            if order_id in MyStrategy.order_history.index and order_status == MyStrategy.order_history.at[order_id, "status"] and symbol_latest_status != 'sell_ordered':
+            if order_id in self.order_history.index and order_status == self.order_history.at[order_id, "status"] and symbol_latest_status != 'sell_ordered':
                 continue
             if order_status == "filled" and symbol_latest_status != 'sold':
-                MyStrategy.order_history.loc[order_id] = [symbol, quantity, order_type, [], openedTime, closedTime, filled_price, order_status]
+                self.order_history.loc[order_id] = [symbol, quantity, order_type, [], openedTime, closedTime, filled_price, order_status]
                 self.db.document(symbol).collection("order_history").document(order_id).set(
                     {"quantity": quantity, "type": order_type.lower(),
                      "filled_price": filled_price, "limit_price": limit_price,
@@ -259,7 +238,7 @@ class MyStrategy(bt.Strategy):
 
             if order_type == "Sell":
                 try:
-                    trade_ids = MyStrategy.order_history.at[order_id, "trade_ids"]
+                    trade_ids = self.order_history.at[order_id, "trade_ids"]
                 except Exception:
                     continue
 
@@ -267,23 +246,16 @@ class MyStrategy(bt.Strategy):
                     trade_status = "own"
                 elif order_status == "received":
                     trade_status = "sell_order_received"
-                elif order_status == "partially_filled":
-                    trade_status = "partially_sold"
-                                       f'DID NOT IMPLEMENT THIS CASE BECAUSE TAMMUZ SAID IT WOULD NOT HAPPEN\n' \
-                                       f'THINGS WERE NOT SUPPOSED TO BE LIKE THIS AHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH'
                 elif order_status == "filled":
                     trade_status = "sold"
-                    subject = f'Sell order (OrderID: {order_id}) filled'
-                    message = f'Sold {quantity} shares of {symbol} at {closedTime} for ${filled_price}/share' \
-                              f'- Total: ${round(filled_price * quantity, 2)}'
 
                     total_profit = 0
                     for trade_id in trade_ids:
                         profit = ((filled_price - self.trade_history.loc[trade_id].purchase_price)
-                                  * MyStrategy.trade_history.loc[trade_id].quantity)
+                                  * self.trade_history.loc[trade_id].quantity)
                         total_profit += profit
 
-                        trade = MyStrategy.trade_history.loc[trade_id]
+                        trade = self.trade_history.loc[trade_id]
                         profit = (filled_price - trade.purchase_price)*trade.quantity
                         bdays = np.busday_count(datetime64_to_date(trade.purchase_time), datetime64_to_date(closedTime), holidays=HOLIDAYS)
                         message += f'\n\nClosed trade: {trade_id}' \
@@ -295,27 +267,33 @@ class MyStrategy(bt.Strategy):
                                    f'{round(100 * (filled_price/trade.purchase_price - 1), 2)}%' \
                                    f'\n\t - Profit prop to budget: {100 * round(profit/self.budget.max_budget, 4)}%'
 
-                    if not MyStrategy.order_history.at[order_id, 'status']:
-                        MyStrategy.budget.update_remaining_budget(update=total_profit, ts_client=self.trade_station)
+                    # If order in trade_history then we already subtracted the cost of the purchase and we need to
+                    # add the money gained from selling
+                    if not self.order_history.at[order_id, 'status']:
+                        self.budget.update_remaining_budget(update=total_profit, ts_client=self.trade_station)
                     else:
-                        MyStrategy.budget.update_remaining_budget(update=filled_price * quantity, ts_client=self.trade_station)
-                    MyStrategy.budget.increase_max_budget(increase=total_profit)
+                        self.budget.update_remaining_budget(update=filled_price * quantity, ts_client=self.trade_station)
+                    self.budget.increase_max_budget(increase=total_profit)
+
+                    # send_email(subject=subject, message=message)
+                    telegram_message = f'{subject}\n\n{message}'
                 else:
                     trade_status = f"INVALID_SELL_STATUS: {order_status}"
+                    telegram_message = f"Received INVALID_SELL_STATUS: {order_status} for order {order_id}"
 
                 # Update local and db copy of trade history
                 for trade_id in trade_ids:
-                    MyStrategy.trade_history.at[trade_id, "status"] = trade_status
-                    MyStrategy.trade_history.at[trade_id, "sold_time"] = closedTime
-                    MyStrategy.trade_history.at[trade_id, "latest_update"] = closedTime
-                    MyStrategy.trade_history.at[trade_id, "sold_price"] = filled_price
+                    self.trade_history.at[trade_id, "status"] = trade_status
+                    self.trade_history.at[trade_id, "sold_time"] = closedTime
+                    self.trade_history.at[trade_id, "latest_update"] = closedTime
+                    self.trade_history.at[trade_id, "sold_price"] = filled_price
                     self.db.document(symbol).collection("trade_history").document(trade_id).set(
                         {"sold_filled_price": filled_price, "sold_limit_price": limit_price,
                          "sold_time": closedTime, "status": trade_status, "latest_update": closedTime}, merge=True)
 
             else:  # Buy order
-                if order_id not in MyStrategy.trade_history.index:
-                    MyStrategy.trade_history.loc[order_id] = [symbol, quantity, MIN_THRESHOLD, closedTime,  # symbol, quantity, sell_threshold, purchase_time,
+                if order_id not in self.trade_history.index:
+                    self.trade_history.loc[order_id] = [symbol, quantity, MIN_THRESHOLD, closedTime,  # symbol, quantity, sell_threshold, purchase_time,
                                                         None, filled_price, 0, None, False, closedTime]
                     self.db.document(symbol).collection("trade_history").document(order_id).set(
                         {"quantity": quantity, "purchase_filled_price": filled_price,
@@ -323,95 +301,92 @@ class MyStrategy(bt.Strategy):
                          "purchase_time": closedTime, "status": None, "sell_threshold": min_threshold,
                          "latest_update": closedTime}, merge=True)
 
+                # # When server restarts, order_changes will contain all orders that we will skip
+                # if closedTime < self.trade_history.at[order_id, "latest_update"]:
+                #     continue
+
                 if order_status == "failed":
                     trade_status = "purchase_failed"
+                    telegram_message = f'Buy order {order_id} failed'
 
-                    if MyStrategy.order_history.at[order_id, "status"]:
-                        MyStrategy.budget.update_remaining_budget(quantity * limit_price, self.trade_station)
+                    # If we subtracted the filled price on the initial budget than add it back
+                    if self.order_history.at[order_id, "status"]:
+                        self.budget.update_remaining_budget(quantity * limit_price, self.trade_station)
                 elif order_status == "received":
                     trade_status = "purchase_order_received"
+                    telegram_message = f'Buy order (OrderID: {order_id}) received'
                 elif order_status == "partially_filled":
                     trade_status = "partially_purchased"
+                    telegram_message = f'Buy order (OrderID: {order_id}) partially filled\n' \
+                                       f'DID NOT IMPLEMENT THIS CASE BECAUSE TAMMUZ SAID IT WOULD NOT HAPPEN\n' \
+                                       f'THINGS WERE NOT SUPPOSED TO BE LIKE THIS AHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH'
                 elif order_status == "filled":
                     trade_status = "own"
 
-                    if MyStrategy.order_history.at[order_id, "status"]:
-                        MyStrategy.budget.update_remaining_budget(quantity * (limit_price - filled_price), self.trade_station)
+                    # If order already exists in trade history then we already subtracted the filled price
+                    # from the budget and we need to add back the difference between the filled and limit price
+                    if self.order_history.at[order_id, "status"]:
+                        self.budget.update_remaining_budget(quantity * (limit_price - filled_price), self.trade_station)
                     else:
-                        MyStrategy.budget.update_remaining_budget(-quantity * filled_price, self.trade_station)
+                        self.budget.update_remaining_budget(-quantity * filled_price, self.trade_station)
 
-                    threshold = MyStrategy.trade_history.loc[order_id].sell_threshold
+                    # Send Email
+                    threshold = self.trade_history.loc[order_id].sell_threshold
                     transaction_cost = quantity * filled_price
+                    subject = f'Buy order (OrderID: {order_id}) filled'
+                    message = f'- Bought {quantity} shares of {symbol} at {closedTime} for ${filled_price}/share\n' \
+                              f'- Total cost: ${round(transaction_cost, 2)}\n' \
+                              f'- Expected return: ${round(threshold * transaction_cost, 2)}' \
+                              f'/{round(100 * threshold, 3)}%'
 
+                    # send_email(subject=subject, message=message)
+                    telegram_message = f'{subject}\n{message}'
                 else:
                     trade_status = f"INVALID_BUY_STATUS: {order_status}"
-                
-                MyStrategy.trade_history.at[order_id, "status"] = trade_status
-                MyStrategy.trade_history.at[order_id, "purchase_price"] = filled_price
-                MyStrategy.trade_history.at[order_id, "purchase_time"] = closedTime
-                MyStrategy.trade_history.at[order_id, "latest_update"] = closedTime
+                    telegram_message = f'Buy order (OrderID: {order_id}) status is INVALID: {order_status}!'
+
+                # Update local and db copy of trade history
+                self.trade_history.at[order_id, "status"] = trade_status
+                self.trade_history.at[order_id, "purchase_price"] = filled_price
+                self.trade_history.at[order_id, "purchase_time"] = closedTime
+                self.trade_history.at[order_id, "latest_update"] = closedTime
                 self.db.document(symbol).collection("trade_history").document(order_id).set(
                     {"purchase_filled_price": filled_price, "purchase_limit_price": limit_price,
                      "purchase_time": closedTime, "status": trade_status, "latest_update": closedTime}, merge=True)
 
-            
-            MyStrategy.order_history.at[order_id, "status"] = order_status
-            MyStrategy.order_history.at[order_id, "price"] = filled_price
-            MyStrategy.order_history.at[order_id, "opened_time"] = openedTime
-            MyStrategy.order_history.at[order_id, "closed_time"] = closedTime
+            # Update local and db copy of orders, update db budget, send telegram message
+            self.order_history.at[order_id, "status"] = order_status
+            self.order_history.at[order_id, "price"] = filled_price
+            self.order_history.at[order_id, "opened_time"] = openedTime
+            self.order_history.at[order_id, "closed_time"] = closedTime
             self.db.document(symbol).collection("order_history").document(order_id).set(
                 {"filled_price": filled_price, "status": order_status, "opened_time": openedTime,
                  "closed_time": closedTime}, merge=True)
             self.db.document("budget").set(
-                {"max_budget": MyStrategy.budget.max_budget,
-                 "remaining_budget": MyStrategy.budget.remaining_budget}, merge=True)
+                {"max_budget": self.budget.max_budget,
+                 "remaining_budget": self.budget.remaining_budget}, merge=True)
+            self.send_telegram_message(message=telegram_message, order=True)
 
-        open_trades = MyStrategy.trade_history[MyStrategy.trade_history.status.isin(["own", "sell_ordered", "sell_order_received"])]
+        # Check if trade history is de-synced
+        open_trades = self.trade_history[self.trade_history.status.isin(["own", "sell_ordered", "sell_order_received"])]
         quantity_per_symbol = open_trades.groupby('symbol').quantity.sum()
         for symbol, tracked_quantity in quantity_per_symbol.items():
             try:
-                actual_quantity = MyStrategy.trade_station.positions[symbol]['Quantity']
+                actual_quantity = self.trade_station.positions[symbol]['Quantity']
                 if actual_quantity != tracked_quantity:
+                    self.send_telegram_message(message=f"DB is de-synced with TradeStation\n"
+                                                   f"DB says we own {tracked_quantity} shares of {symbol} "
+                                                   f"but we actually own {actual_quantity} shares")
             except Exception:
                 print(f"symbol {symbol} not found, likely no longer tracked ")
 
 
-    
-    def check_buy(self):
-        import random
-        quantity = random.randint(0, 3)
-        threshold = random.uniform(0, 1/3)
-
-        if quantity == 0:
-            return 0
-        logger.info(f'Attempting to buy {quantity} shares of {symbol} at ${self.data.close}/share')
-        response = self.trade_station.submit_market_order(symbol=symbol, qty=quantity, order_type="BUY")
-        # response = self.trade_station.submit_limit_order(symbol=symbol, limit_price=curr_price,
-        #                                                  qty=quantity, order_type="BUY")
-        if response:
-
-            order_id = response["OrderID"]
-
-            status = "purchase_ordered"
-            MyStrategy.budget.update_remaining_budget(-self.data.close*quantity, self.trade_station)
-
-            # Update local and db copies of order history
-            MyStrategy.order_history.loc[order_id] = [symbol, quantity, "buy", None, self.data.datetime.time(0), None, self.data.close, status]
-
-
-            # Update local and db copies of trade history
-            # symbol, quantity, sell_threshold, purchase_time,
-            # sold_time, purchase_price, sold_price, status, latest_update
-            MyStrategy.trade_history.loc[order_id] = [symbol, quantity, threshold, self.data.datetime.time(0),
-                                                None, curr_price, 0, status, False, self.data.datetime.time(0)]
-
-        return quantity
-
     def check_sell(self):
+
         if not market_open_regular_hours():
             return
 
-        open_trades = MyStrategy.trade_history[(MyStrategy.trade_history.symbol == symbol) & (MyStrategy.trade_history.status == "own")]
+        open_trades = self.trade_history[(self.trade_history.symbol == symbol) & (self.trade_history.status == "own")]
 
         if open_trades.empty:
             return
@@ -420,47 +395,60 @@ class MyStrategy(bt.Strategy):
 
         new_trades_above_threshold = open_trades.loc[(sell_prices <= self.data.close) & ~open_trades.above_threshold]
         for trade_id in new_trades_above_threshold.index:
-            MyStrategy.trade_history.loc[trade_id, 'above_threshold'] = True
+            self.trade_history.loc[trade_id, 'above_threshold'] = True
 
-        MyStrategy.sell_trades = open_trades.loc[MyStrategy.trade_history.above_threshold]
+        self.sell_trades = open_trades.loc[self.trade_history.above_threshold]
 
         print(f'Checking to sell {symbol}'
               f'\n\t current price: {self.data.close}, trade cutoffs: {sell_prices}')
 
+
         self.handle_sell()
 
+
     def handle_sell(self):
-        if MyStrategy.sell_trades.empty:
+        if self.sell_trades.empty:
             return
 
-        qty = MyStrategy.sell_trades.quantity.sum()
+        qty = self.sell_trades.quantity.sum()
 
-        logger.info(f'Selling {qty} shares of {symbol} at ${self.data.close}/share')
+        #logger.info(f'Selling {qty} shares of {symbol} at ${self.data.close}/share')
         response = self.trade_station.submit_market_order(symbol=symbol, qty=qty, order_type="SELL")
 
-        total_sell_quantity = int(MyStrategy.sell_trades.quantity.sum())
+        total_sell_quantity = int(self.sell_trades.quantity.sum())
         if response:
             order_id = response["OrderID"]
 
-            for trade_id in MyStrategy.sell_trades.index:
+            for trade_id in self.sell_trades.index:
                 self.trade_history.at[trade_id, "status"] = "sell_ordered"
                 self.trade_history.at[trade_id, "sold_time"] = self.data.datetime.time(0)
                 self.trade_history.at[trade_id, "latest_update"] = self.data.datetime.time(0)
                 self.trade_history.at[trade_id, "sold_price"] = self.data.close
 
 
-            MyStrategy.order_history.loc[order_id] = [symbol, total_sell_quantity, "sell", list(sell_trades.index),
+            self.order_history.loc[order_id] = [symbol, total_sell_quantity, "sell", list(sell_trades.index),
                                                 self.data.datetime.time(0), None, self.data.close, "ordered"]
+          
+    
+
+
+class MyStrategy(bt.Strategy):
+    params = (
+        ('symbol', 'a')
+        )
+
+    def __init__(self):
+
 
     def next(self):
-        print('date:{},close:{}'.format(self.data.datetime.time(0), self.data.close))
+        print('date:{},close:{}'.format(self.data.datetime.time(0), self.data.close[0]))
         if not market_open_after_hours():
             return
 
-        quantity_bought = self.check_buy()
+        quantity_bought = Datas.check_buy()
 
         if quantity_bought == 0:
-            self.check_sell()
+            Datas.check_sell()
 
 if __name__ == '__main__':
   
