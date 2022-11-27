@@ -7,14 +7,13 @@ from backtrader.feed import DataBase
 from backtrader import date2num, num2date
 from backtrader.utils.py3 import queue, with_metaclass
 import backtrader as bt
-from ts.client import TradeStationClient
 from Tradestation_python_api.ts.client import TradeStationClient
 from helper import create_logger
 import sys
 import firebase_admin
-from firebase_admin import credentials, firestore
+from firebase_admin import credentials, firestore, initialize_app
 #logger = create_logger(file=f'{sys.argv[1].replace(" ", "_")}_log.log')
-
+import signal
 import schedule
 from copy import deepcopy
 from time import sleep
@@ -45,35 +44,36 @@ from DataClass import TradeStationData
 
 class MyStrategy(bt.Strategy):
     params = (
-        ('symbol', 'a')
-        )
+        ('symbol', 'a'),
+        ('details', clients['Paper'])
+    )
 
-    def __init__(self):
+    def __init__(self, args):
 
+        details = self.p.details
 
-        details = clients['Paper']
+        #details = clients['Paper']
         self.trade_client = TradeStationClient(
             username=details['Username'],
             client_id=details['ClientId'],
             client_secret=details['Secret'],
             redirect_uri="http://localhost",
             version=details['Version'],
-            paper_trading=paper
+            paper_trading=True
         )
 
         self.trade_station = TradeStation(client='Paper', symbols=details['Symbols'],
                                           paper=True, interval=1, unit='Minute', session='USEQPreAndPost')
 
-        self.account_name = [account['Name'] for account in self.trade_client.get_accounts(details['Username'])
-                             if account['TypeDescription'] == details['AccountType']][0]
-
+        self.account_name = [account['Name'] for account in self.trade_client.get_accounts(details['Username']) if account['TypeDescription'] == details['AccountType']][0]
         cred = credentials.Certificate('./firestore_key.json')
         initialize_app(cred)
+
         self.db = firestore.client().collection(self.trade_station.account_name)
 
         self.trade_history = pd.DataFrame(columns=TRADE_HISTORY_COLUMNS + ["latest_update"])
         self.temp_trade_history = {}
-        pqdm(self.db.list_documents(), self.get_document_info, n_jobs=10)
+        #pqdm(self.db.list_documents(), self.get_document_info, n_jobs=10)
         self.trade_history = pd.DataFrame.from_dict(self.temp_trade_history, orient='index', columns=TRADE_HISTORY_COLUMNS + ["latest_update"])
         self.trade_history = self.trade_history.sort_values(by='purchase_time')
 
@@ -129,13 +129,14 @@ class MyStrategy(bt.Strategy):
 
 if __name__ == '__main__':
   
-  symbols =[]
+  symbols =['GOOG']
   cerebro = bt.Cerebro() 
 
   for s in symbols:
-      data = TradeStationData(s)
-      sleep(0.001)
-      cerebro.adddata(data)
-      cerebro.addstrategy(MyStrategy, symbol = s)
+    strat_params = {'symbol': s, 'details': clients['Paper']}
+    data = TradeStationData(strat_params)
+    sleep(0.001)
+    cerebro.adddata(data)
+    cerebro.addstrategy(MyStrategy, strat_params)
 
   cerebro.run()
