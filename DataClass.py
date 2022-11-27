@@ -7,14 +7,13 @@ from backtrader.feed import DataBase
 from backtrader import date2num, num2date
 from backtrader.utils.py3 import queue, with_metaclass
 import backtrader as bt
-from ts.client import TradeStationClient
 from Tradestation_python_api.ts.client import TradeStationClient
 from helper import create_logger
 import sys
 import firebase_admin
 from firebase_admin import credentials, firestore
 #logger = create_logger(file=f'{sys.argv[1].replace(" ", "_")}_log.log')
-
+import signal
 import schedule
 from copy import deepcopy
 from time import sleep
@@ -44,30 +43,26 @@ from constants import TRADE_HISTORY_COLUMNS, TIMEZONE, HOLIDAYS, FAILED_STATUSES
 
 
 class TradeStationData(bt.feed.DataBase):
+    params = (
+        ('symbol', 'a'),
+        ('details', clients['Paper'])
+        )
 
 
-    def __init__(self, client: 'Paper', paper: bool = True,
-                 interval: int = 1, unit: str = 'Minute', session: str = 'USEQPreAndPost'):
+    def __init__(self, args):
 
         super(TradeStationData, self).__init__()
 
-        self.symbol = symbol
-
-        if paper:
-            client = 'Paper'
-
-        self.client = client
-        self.trade_station = TradeStation(client=client, symbols=self.symbol,
-                                          paper=paper, interval=interval, unit=unit, session=session)
+        details = self.p.details
+        symbol = self.p.symbol
+        self.trade_station = TradeStation(client='Paper', symbols=details['Symbols'],
+                                          paper=True, interval=1, unit='Minute', session='USEQPreAndPost')
         
 
-    def start(self):
-        #logger.addHandler(self.handler)
-
-
-        catchable_signals = set(signal.Signals) - {signal.CTRL_C_EVENT, signal.CTRL_BREAK_EVENT}
-        for sig in catchable_signals:
-            signal.signal(sig, )
+    #def start(self):
+    #    catchable_signals = set(signal.Signals) - {signal.CTRL_C_EVENT, signal.CTRL_BREAK_EVENT}
+    #    for sig in catchable_signals:
+    #        signal.signal(sig, )
 
 
 
@@ -86,7 +81,7 @@ class TradeStationData(bt.feed.DataBase):
 
         return time_till_open
 
-    def _load(self, symbol):
+    def _load(self):
 
         while True:
             try:
