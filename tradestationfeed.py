@@ -44,14 +44,15 @@ from DataClass import TradeStationData
 
 class MyStrategy(bt.Strategy):
     params = (
-        ('symbol', 'a'),
+        ('symbol', None),
         ('details', clients['Paper'])
     )
 
     def __init__(self, args):
 
         details = self.p.details
-
+        symbol = self.params.symbol
+        print(details, symbol)
         #details = clients['Paper']
         self.trade_client = TradeStationClient(
             username=details['Username'],
@@ -70,7 +71,6 @@ class MyStrategy(bt.Strategy):
         initialize_app(cred)
 
         self.db = firestore.client().collection(self.trade_station.account_name)
-
         self.trade_history = pd.DataFrame(columns=TRADE_HISTORY_COLUMNS + ["latest_update"])
         self.temp_trade_history = {}
         #pqdm(self.db.list_documents(), self.get_document_info, n_jobs=10)
@@ -86,11 +86,11 @@ class MyStrategy(bt.Strategy):
         threshold = random.uniform(0, 1/3)
 
         if not market_open_after_hours():
-
+            print('Closed')
             return
 
         else: 
-
+            print('Open')
             if quantity == 0:
 
                 open_trades = self.trade_history[(self.trade_history.symbol == symbol) & (self.trade_history.status == "own")]
@@ -101,7 +101,7 @@ class MyStrategy(bt.Strategy):
 
                 sell_prices = (1 + open_trades.sell_threshold) * open_trades.purchase_price
 
-                new_trades_above_threshold = open_trades.loc[(sell_prices <= curr_price) & ~open_trades.above_threshold]
+                new_trades_above_threshold = open_trades.loc[(sell_prices <= self.data.close[0]) & ~open_trades.above_threshold]
                 for trade_id in new_trades_above_threshold.index:
                     self.trade_history.loc[trade_id, 'above_threshold'] = True
                     self.db.document(symbol).collection("trade_history").document(trade_id).set(
@@ -117,6 +117,7 @@ class MyStrategy(bt.Strategy):
 
                 self.trade_client.place_order(account_key=self.account_name, symbol=symbol, trade_action='SELL',
                                                   quantity=qty, order_type="Market", duration="DAY")
+                self.sell()
 
 
 
@@ -124,19 +125,20 @@ class MyStrategy(bt.Strategy):
 
                 self.trade_client.place_order(account_key=self.account_name, symbol=symbol, trade_action='BUY',
                                                       quantity=quantity, order_type="Market", duration="DAY")
+                self.buy()
 
 
 
 if __name__ == '__main__':
   
-  symbols =['GOOG']
+  symbols =['GOOGL']
   cerebro = bt.Cerebro() 
 
   for s in symbols:
     strat_params = {'symbol': s, 'details': clients['Paper']}
-    data = TradeStationData(strat_params)
+    data = TradeStationData(strat_params, symbol = s, details = clients['Paper'])
     sleep(0.001)
     cerebro.adddata(data)
-    cerebro.addstrategy(MyStrategy, strat_params)
+    cerebro.addstrategy(MyStrategy, strat_params, symbol = s, details = clients['Paper'])
 
   cerebro.run()
