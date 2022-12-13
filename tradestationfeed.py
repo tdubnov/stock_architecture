@@ -314,6 +314,8 @@ class MyStrategy(bt.Strategy):
 
         print('date:{},close:{}'.format(self.data.datetime.time(0), self.data.close[0]))
 
+        timee = firestore.SERVER_TIMESTAMP
+
         import random
         quantity = random.randint(0, 3)
         threshold = random.uniform(0, 1/3)
@@ -362,14 +364,14 @@ class MyStrategy(bt.Strategy):
 
                         self.db.document(self.symbol).collection("trade_history").document(trade_id).set(
                             {"sold_filled_price": 0, "sold_limit_price": self.data.close[0],
-                             "sold_time": self.data.datetime.time(0), "status": "sell_ordered",
-                             "latest_update": self.data.datetime.time(0)}, merge=True)
+                             "sold_time": timee, "status": "sell_ordered",
+                             "latest_update": timee}, merge=True)
 
                     self.order_history.loc[order_id] = [symbol, qty, "sell", list(sell_trades.index),
                                                         self.data.datetime.time(0), None, self.data.close[0], "ordered"]
                     self.db.document(self.symbol).collection("order_history").document(order_id).set(
                         {"quantity": qty, "type": "sell", "trade_ids": list(sell_trades.index),
-                         "filled_price": 0, 'limit_price': self.data.close[0], "time": self.data.datetime.time(0),
+                         "filled_price": 0, 'limit_price': self.data.close[0], "time": timee,
                          "status": "ordered"}, merge=True)
                 self.sell()
 
@@ -394,7 +396,7 @@ class MyStrategy(bt.Strategy):
                     self.order_history.loc[order_id] = [symbol, quantity, "buy", None, self.data.datetime.time(0), None, self.data.close[0], status]
                     self.db.document(symbol).collection("order_history").document(order_id).set(
                         {"quantity": quantity, "type": "buy", "filled_price": 0, 'limit_price': self.data.close[0],
-                         "time": self.data.datetime.time(0), "status": status}, merge=True)
+                         "time": timee, "status": status}, merge=True)
 
                     # Update local and db copies of trade history
                     # symbol, quantity, sell_threshold, purchase_time,
@@ -403,15 +405,15 @@ class MyStrategy(bt.Strategy):
                                                         None, self.data.close[0], 0, status, False, self.data.datetime.time(0)]
                     self.db.document(symbol).collection("trade_history").document(order_id).set(
                         {"quantity": quantity, "purchase_filled_price": 0, "purchase_limit_price": self.data.close[0],
-                         "purchase_time": self.data.datetime.time(0), "status": status, "sell_threshold": threshold,
-                         "latest_update": self.data.datetime.time(0), "above_threshold": False}, merge=True)
+                         "purchase_time": timee, "status": status, "sell_threshold": threshold,
+                         "latest_update": timee, "above_threshold": False}, merge=True)
                 self.buy()
 
 
 
 if __name__ == '__main__':
   
-  symbols =['GOOGL']
+  symbols =['AAPL']
   cerebro = bt.Cerebro() 
 
   for s in symbols:
