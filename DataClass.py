@@ -26,6 +26,7 @@ import datetime
 import logging
 import socket
 import json
+import pytz
 from pqdm.threads import pqdm
 from multiprocess import Pool
 import pandas_market_calendars as calendars
@@ -54,7 +55,7 @@ class TradeStationData(bt.feed.DataBase):
         super(TradeStationData, self).__init__()
 
         details = self.p.details
-        symbol = self.p.symbol
+        self.symbol = self.p.symbol
         self.trade_station = TradeStation(client='Paper', symbols=details['Symbols'],
                                           paper=True, interval=1, unit='Minute', session='USEQPreAndPost')
 
@@ -66,7 +67,6 @@ class TradeStationData(bt.feed.DataBase):
     def time_to_open(self):
 
         now = datetime.datetime.now(tz=datetime.timezone.utc)
-        #print(now)
         if not np.is_busday(now.date(), holidays=HOLIDAYS):
             next_date = datetime64_to_date(np.busday_offset(now.date(), 0, roll='forward', holidays=HOLIDAYS))
 
@@ -77,23 +77,21 @@ class TradeStationData(bt.feed.DataBase):
             next_date = now.date()
 
         next_opening_time = self.trade_station.nyse.schedule(start_date=next_date, end_date=next_date).market_open[0]
-        #print(next_opening_time)
+        next_opening_time = next_opening_time.replace(tzinfo=None)
+        now = now.replace(tzinfo=None)
         time_till_open = next_opening_time- now - datetime.timedelta(minutes=1)
-        print(time_till_open)
         return time_till_open
 
     def _load(self):
 
-        #while True:
         try:
             time_till_open = self.time_to_open()
-            print(time_till_open.total_seconds())
+            
             if time_till_open.total_seconds()>0:
                 #logger.info(f'Stream quotes thread sleeping for {time_till_open}')
                 sleep(time_till_open.total_seconds())
-                print(symbol)
-            with self.trade_station.ts_client.stream_quotes(list(symbol)) as stream:
-                print(stream)
+
+            with self.trade_station.ts_client.stream_quotes([self.symbol]) as stream:
                 if stream.status_code != 200:
                     raise Exception(f"Cannot stream quotes (HTTP {stream.status_code}): {stream.text}")
 
@@ -107,14 +105,14 @@ class TradeStationData(bt.feed.DataBase):
                     if any([param not in decoded_line for param in ["Symbol", "TradeTime", "Close"]]):
                         continue
 
-                    #symbol = decoded_line['Symbol']
+                    symbol = decoded_line['Symbol']
                     curr_time = pd.Timestamp(decoded_line['TradeTime']).to_pydatetime().astimezone(TIMEZONE)
 
                     close = float(decoded_line['Close'])
                     curr_price = round(close, 2)
-                    print(f'New price at {curr_time} - {self.symbol}: ${curr_price}')
+                    print(f'New price at {curr_time} - {symbol}: ${curr_price}')
 
-                    print(curr_price, 'bt.date2num(pd.to_datetime(curr_time))', float(decoded_line['High']), float(decoded_line['Low']), float(decoded_line['Volume']))
+                    print(curr_price, bt.date2num(pd.to_datetime(curr_time)), float(decoded_line['High']), float(decoded_line['Low']), float(decoded_line['Volume']))
                     self.lines.close[0] = curr_price
                     self.lines.datetime[0] = bt.date2num(pd.to_datetime(curr_time))
                     self.lines.high[0] = float(decoded_line['High'])
