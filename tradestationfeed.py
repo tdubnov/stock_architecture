@@ -348,6 +348,7 @@ class MyStrategy(bt.Strategy):
 
                 response = self.trade_client.place_order(account_key=self.account_name, symbol=self.symbol, trade_action='SELL',
                                                   quantity=qty, order_type="Market", duration="DAY")
+                print(response)
 
                 if response:
                     order_id = response["OrderID"]
@@ -377,6 +378,7 @@ class MyStrategy(bt.Strategy):
 
                 response = self.trade_client.place_order(account_key=self.account_name, symbol=self.symbol, trade_action='BUY',
                                                       quantity=quantity, order_type="Market", duration="DAY")
+                print(response)
 
                 if response:
 
