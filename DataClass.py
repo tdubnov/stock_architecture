@@ -63,7 +63,7 @@ class TradeStationData(bt.feed.DataBase):
     #    for sig in catchable_signals:
     #        signal.signal(sig, )
 
-    def _time_to_open(self):
+    def time_to_open(self):
 
         now = datetime.datetime.now(tz=datetime.timezone.utc)
         #print(now)
@@ -77,63 +77,64 @@ class TradeStationData(bt.feed.DataBase):
             next_date = now.date()
 
         next_opening_time = self.trade_station.nyse.schedule(start_date=next_date, end_date=next_date).market_open[0]
-        print(next_opening_time)
-        print(datetime.timedelta(minutes=1))
-        time_till_open = next_opening_time - now - datetime.timedelta(minutes=1)
+        #print(next_opening_time)
+        time_till_open = next_opening_time- now - datetime.timedelta(minutes=1)
+        print(time_till_open)
         return time_till_open
 
     def _load(self):
 
-        while True:
-            try:
-                time_till_open = self._time_to_open()
-                print(time_till_open.total_seconds())
-                if time_till_open.total_seconds() >0:
-                    #logger.info(f'Stream quotes thread sleeping for {time_till_open}')
-                    sleep(time_till_open.total_seconds())
-                    print(symbol)
-                with self.trade_station.ts_client.stream_quotes(list(symbol)) as stream:
-                    print(stream)
-                    if stream.status_code != 200:
-                        raise Exception(f"Cannot stream quotes (HTTP {stream.status_code}): {stream.text}")
+        #while True:
+        try:
+            time_till_open = self.time_to_open()
+            print(time_till_open.total_seconds())
+            if time_till_open.total_seconds()>0:
+                #logger.info(f'Stream quotes thread sleeping for {time_till_open}')
+                sleep(time_till_open.total_seconds())
+                print(symbol)
+            with self.trade_station.ts_client.stream_quotes(list(symbol)) as stream:
+                print(stream)
+                if stream.status_code != 200:
+                    raise Exception(f"Cannot stream quotes (HTTP {stream.status_code}): {stream.text}")
 
-                    print('Stream quotes started')
-                    for line in stream.iter_lines():
-                        # str_line = line.decode('utf-8')
-                        if not line or line == b'':
-                            continue
+                print('Stream quotes started')
+                for line in stream.iter_lines():
+                    # str_line = line.decode('utf-8')
+                    if not line or line == b'':
+                        continue
 
-                        decoded_line = json.loads(line)
-                        if any([param not in decoded_line for param in ["Symbol", "TradeTime", "Close"]]):
-                            continue
+                    decoded_line = json.loads(line)
+                    if any([param not in decoded_line for param in ["Symbol", "TradeTime", "Close"]]):
+                        continue
 
-                        #symbol = decoded_line['Symbol']
-                        curr_time = pd.Timestamp(decoded_line['TradeTime']).to_pydatetime().astimezone(TIMEZONE)
+                    #symbol = decoded_line['Symbol']
+                    curr_time = pd.Timestamp(decoded_line['TradeTime']).to_pydatetime().astimezone(TIMEZONE)
 
-                        close = float(decoded_line['Close'])
-                        curr_price = round(close, 2)
-                        print(f'New price at {curr_time} - {symbol}: ${curr_price}')
+                    close = float(decoded_line['Close'])
+                    curr_price = round(close, 2)
+                    print(f'New price at {curr_time} - {self.symbol}: ${curr_price}')
 
-                        self.lines.close[0] = curr_price
-                        self.lines.datetime[0] = bt.date2num(pd.to_datetime(curr_time))
-                        self.lines.high[0] = float(decoded_line['High'])
-                        self.lines.low[0] = float(decoded_line['Low'])
-                        self.lines.volume[0] = float(decoded_line['Volume'])
-                        print(curr_price, bt.date2num(pd.to_datetime(curr_time)), float(decoded_line['High']), float(decoded_line['Low']), float(decoded_line['Volume']))
+                    print(curr_price, 'bt.date2num(pd.to_datetime(curr_time))', float(decoded_line['High']), float(decoded_line['Low']), float(decoded_line['Volume']))
+                    self.lines.close[0] = curr_price
+                    self.lines.datetime[0] = bt.date2num(pd.to_datetime(curr_time))
+                    self.lines.high[0] = float(decoded_line['High'])
+                    self.lines.low[0] = float(decoded_line['Low'])
+                    self.lines.volume[0] = float(decoded_line['Volume'])
+                    print(curr_price, bt.date2num(pd.to_datetime(curr_time)), float(decoded_line['High']), float(decoded_line['Low']), float(decoded_line['Volume']))
 
-                        return True
-            except requests.exceptions.ChunkedEncodingError:
-                #logger.warning(f'Stream quotes chunked encoding error')
-                print('Stream quotes chunked encoding error')
-                return
+                    #return True
+        except requests.exceptions.ChunkedEncodingError:
+            #logger.warning(f'Stream quotes chunked encoding error')
+            print('Stream quotes chunked encoding error')
+            #return
 
-            except Exception:
-                #logger.exception(f"Exception in stream quotes")
-                print('Stream quotes chunked encoding error')
-                return
+        except Exception:
+            #logger.exception(f"Exception in stream quotes")
+            print('Stream quotes chunked encoding error')
+            #return
 
-            print('Stream quotes stopped')
-            return True
+        print('Stream quotes stopped')
+        #return True
 
     def stop(self):
         pass
