@@ -310,6 +310,8 @@ class MyStrategy(bt.Strategy):
 
     def next(self):
 
+        symbol = self.symbol
+
         print('date:{},close:{}'.format(self.data.datetime.time(0), self.data.close[0]))
 
         import random
@@ -348,10 +350,9 @@ class MyStrategy(bt.Strategy):
 
                 response = self.trade_client.place_order(account_key=self.account_name, symbol=self.symbol, trade_action='SELL',
                                                   quantity=qty, order_type="Market", duration="DAY")
-                print(response)
 
                 if response:
-                    order_id = response["OrderID"]
+                    order_id = response['Orders'][0]['OrderID']
 
                     for trade_id in sell_trades.index:
                         self.trade_history.at[trade_id, "status"] = "sell_ordered"
@@ -364,7 +365,7 @@ class MyStrategy(bt.Strategy):
                              "sold_time": self.data.datetime.time(0), "status": "sell_ordered",
                              "latest_update": self.data.datetime.time(0)}, merge=True)
 
-                    self.order_history.loc[order_id] = [self.symbol, qty, "sell", list(sell_trades.index),
+                    self.order_history.loc[order_id] = [symbol, qty, "sell", list(sell_trades.index),
                                                         self.data.datetime.time(0), None, self.data.close[0], "ordered"]
                     self.db.document(self.symbol).collection("order_history").document(order_id).set(
                         {"quantity": qty, "type": "sell", "trade_ids": list(sell_trades.index),
@@ -382,7 +383,7 @@ class MyStrategy(bt.Strategy):
 
                 if response:
 
-                    order_id = response["OrderID"]
+                    order_id = response['Orders'][0]['OrderID']
 
                     status = "purchase_ordered"
                     self.budget.update_remaining_budget(-self.data.close[0]*quantity, self.trade_station)
@@ -398,7 +399,7 @@ class MyStrategy(bt.Strategy):
                     # Update local and db copies of trade history
                     # symbol, quantity, sell_threshold, purchase_time,
                     # sold_time, purchase_price, sold_price, status, latest_update
-                    self.trade_history.loc[order_id] = [symbol, quantity, threshold, self.data.datetime.time(0),
+                    self.trade_history.loc[order_id] = [self.symbol, quantity, threshold, self.data.datetime.time(0),
                                                         None, self.data.close[0], 0, status, False, self.data.datetime.time(0)]
                     self.db.document(symbol).collection("trade_history").document(order_id).set(
                         {"quantity": quantity, "purchase_filled_price": 0, "purchase_limit_price": self.data.close[0],
