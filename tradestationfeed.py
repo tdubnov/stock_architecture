@@ -44,15 +44,15 @@ from DataClass import TradeStationData
 
 class MyStrategy(bt.Strategy):
     params = (
-        ('symbol', None),
+        ('symbol', 'GOOGL'),
         ('details', clients['Paper'])
     )
 
     def __init__(self, args):
 
         details = self.p.details
-        symbol = self.p.symbol
-        print(details, symbol)
+        self.symbol = self.p.symbol
+        print(details, self.symbol)
         self.trade_client = TradeStationClient(
             username=details['Username'],
             client_id=details['ClientId'],
@@ -176,7 +176,7 @@ class MyStrategy(bt.Strategy):
             if order_id in self.order_history.index and order_status == self.order_history.at[order_id, "status"] and symbol_latest_status != 'sell_ordered':
                 continue
             if order_status == "filled" and symbol_latest_status != 'sold':
-                self.order_history.loc[order_id] = [symbol, quantity, order_type, [], openedTime, closedTime, filled_price, order_status]
+                self.order_history.loc[order_id] = [self.symbol, quantity, order_type, [], openedTime, closedTime, filled_price, order_status]
                 self.db.document(symbol).collection("order_history").document(order_id).set(
                     {"quantity": quantity, "type": order_type.lower(),
                      "filled_price": filled_price, "limit_price": limit_price,
@@ -324,7 +324,7 @@ class MyStrategy(bt.Strategy):
             print('Open')
             if quantity == 0:
 
-                open_trades = self.trade_history[(self.trade_history.symbol == symbol) & (self.trade_history.status == "own")]
+                open_trades = self.trade_history[(self.trade_history.symbol == self.symbol) & (self.trade_history.status == "own")]
 
 
                 if open_trades.empty:
@@ -335,7 +335,7 @@ class MyStrategy(bt.Strategy):
                 new_trades_above_threshold = open_trades.loc[(sell_prices <= self.data.close[0]) & ~open_trades.above_threshold]
                 for trade_id in new_trades_above_threshold.index:
                     self.trade_history.loc[trade_id, 'above_threshold'] = True
-                    self.db.document(symbol).collection("trade_history").document(trade_id).set(
+                    self.db.document(self.symbol).collection("trade_history").document(trade_id).set(
                         {"above_threshold": True}, merge=True)
 
                 sell_trades = open_trades.loc[self.trade_history.above_threshold]
@@ -346,7 +346,7 @@ class MyStrategy(bt.Strategy):
 
                 qty = sell_trades.quantity.sum()
 
-                response = self.trade_client.place_order(account_key=self.account_name, symbol=symbol, trade_action='SELL',
+                response = self.trade_client.place_order(account_key=self.account_name, symbol=self.symbol, trade_action='SELL',
                                                   quantity=qty, order_type="Market", duration="DAY")
 
                 if response:
@@ -358,14 +358,14 @@ class MyStrategy(bt.Strategy):
                         self.trade_history.at[trade_id, "latest_update"] = self.data.datetime.time(0)
                         self.trade_history.at[trade_id, "sold_price"] = self.data.close[0]
 
-                        self.db.document(symbol).collection("trade_history").document(trade_id).set(
+                        self.db.document(self.symbol).collection("trade_history").document(trade_id).set(
                             {"sold_filled_price": 0, "sold_limit_price": self.data.close[0],
                              "sold_time": self.data.datetime.time(0), "status": "sell_ordered",
                              "latest_update": self.data.datetime.time(0)}, merge=True)
 
-                    self.order_history.loc[order_id] = [symbol, qty, "sell", list(sell_trades.index),
+                    self.order_history.loc[order_id] = [self.symbol, qty, "sell", list(sell_trades.index),
                                                         self.data.datetime.time(0), None, self.data.close[0], "ordered"]
-                    self.db.document(symbol).collection("order_history").document(order_id).set(
+                    self.db.document(self.symbol).collection("order_history").document(order_id).set(
                         {"quantity": qty, "type": "sell", "trade_ids": list(sell_trades.index),
                          "filled_price": 0, 'limit_price': self.data.close[0], "time": self.data.datetime.time(0),
                          "status": "ordered"}, merge=True)
@@ -375,7 +375,7 @@ class MyStrategy(bt.Strategy):
 
             else:
 
-                response = self.trade_client.place_order(account_key=self.account_name, symbol=symbol, trade_action='BUY',
+                response = self.trade_client.place_order(account_key=self.account_name, symbol=self.symbol, trade_action='BUY',
                                                       quantity=quantity, order_type="Market", duration="DAY")
 
                 if response:
@@ -413,6 +413,7 @@ if __name__ == '__main__':
 
   for s in symbols:
     strat_params = {'symbol': s, 'details': clients['Paper']}
+    #, symbol = s, details = clients['Paper']
     data = TradeStationData(strat_params, symbol = s, details = clients['Paper'])
     sleep(0.001)
     cerebro.adddata(data)
