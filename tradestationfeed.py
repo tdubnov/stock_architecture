@@ -51,7 +51,7 @@ class MyStrategy(bt.Strategy):
     def __init__(self, args):
 
         details = self.p.details
-        symbol = self.params.symbol
+        symbol = self.p.symbol
         print(details, symbol)
         self.trade_client = TradeStationClient(
             username=details['Username'],
@@ -78,13 +78,12 @@ class MyStrategy(bt.Strategy):
         self.temp_order_history = {}
         self.trade_history = pd.DataFrame(columns=TRADE_HISTORY_COLUMNS + ["latest_update"])
         self.order_history = pd.DataFrame(columns=ORDER_HISTORY_COLUMNS)
-        #self.read_db()
+        self.read_db()
 
 
     def read_db(self):
         print('Reading db')
         budget_info = self.db.document("budget").get().to_dict()
-        ###There is a problem in this line###
         self.budget.max_budget = budget_info["max_budget"]
         self.budget.remaining_budget = budget_info["remaining_budget"]
         self.budget.starting_budget = budget_info["starting_budget"]
