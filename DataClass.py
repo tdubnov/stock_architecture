@@ -122,19 +122,19 @@ class TradeStationData(bt.feed.DataBase):
                     self.lines.volume[0] = float(decoded_line['Volume'])
                     print(curr_price, bt.date2num(pd.to_datetime(curr_time)), float(decoded_line['High']), float(decoded_line['Low']), float(decoded_line['Volume']))
 
-                    #return True
+                    return True
         except requests.exceptions.ChunkedEncodingError:
             #logger.warning(f'Stream quotes chunked encoding error')
             print('Stream quotes chunked encoding error')
-            #return
+            return None
 
         except Exception:
             #logger.exception(f"Exception in stream quotes")
             print('Stream quotes chunked encoding error')
-            #return
+            return None
 
         print('Stream quotes stopped')
-        #return True
+        return None
 
     def stop(self):
         pass
