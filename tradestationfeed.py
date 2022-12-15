@@ -11,6 +11,7 @@ from Tradestation_python_api.ts.client import TradeStationClient
 from helper import create_logger
 import sys
 import firebase_admin
+from backtrader_plotting import Bokeh
 from firebase_admin import credentials, firestore, initialize_app
 #logger = create_logger(file=f'{sys.argv[1].replace(" ", "_")}_log.log')
 import signal
@@ -443,3 +444,5 @@ if __name__ == '__main__':
         #cerebro.broker.getvalue() to get the new budget
 
     cerebro.run()
+    b = Bokeh(style='bar', plot_mode='single')
+    cerebro.plot(b)
