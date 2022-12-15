@@ -46,7 +46,7 @@ from constants import TRADE_HISTORY_COLUMNS, TIMEZONE, HOLIDAYS, FAILED_STATUSES
 class TradeStationData(bt.feed.DataBase):
     params = (
         ('symbol', 'a'),
-        ('details', clients['Paper'])
+        ('details', clients['Paper']),
         )
 
 
