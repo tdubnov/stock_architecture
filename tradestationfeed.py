@@ -28,6 +28,7 @@ import socket
 import json
 from pqdm.threads import pqdm
 from multiprocess import Pool
+import random
 
 from config import clients
 from tradestation import TradeStation
@@ -176,7 +177,7 @@ class MyStrategy(bt.Strategy):
             if order_id in self.order_history.index and order_status == self.order_history.at[order_id, "status"] and symbol_latest_status != 'sell_ordered':
                 continue
             if order_status == "filled" and symbol_latest_status != 'sold':
-                self.order_history.loc[order_id] = [self.symbol, quantity, order_type, [], openedTime, closedTime, filled_price, order_status]
+                self.order_history.loc[order_id] = [self.symbol, quantity, order_type, [], opened_time, closed_time, filled_price, order_status]
                 self.db.document(symbol).collection("order_history").document(order_id).set(
                     {"quantity": quantity, "type": order_type.lower(),
                      "filled_price": filled_price, "limit_price": limit_price,
@@ -221,22 +222,23 @@ class MyStrategy(bt.Strategy):
                 # Update local and db copy of trade history
                 for trade_id in trade_ids:
                     self.trade_history.at[trade_id, "status"] = trade_status
-                    self.trade_history.at[trade_id, "sold_time"] = closedTime
-                    self.trade_history.at[trade_id, "latest_update"] = closedTime
+                    self.trade_history.at[trade_id, "sold_time"] = closed_time
+                    self.trade_history.at[trade_id, "latest_update"] = closed_time
                     self.trade_history.at[trade_id, "sold_price"] = filled_price
                     self.db.document(symbol).collection("trade_history").document(trade_id).set(
                         {"sold_filled_price": filled_price, "sold_limit_price": limit_price,
                          "sold_time": closedTime, "status": trade_status, "latest_update": closedTime}, merge=True)
+                
 
             else:  # Buy order
                 if order_id not in self.trade_history.index:
-                    self.trade_history.loc[order_id] = [symbol, quantity, MIN_THRESHOLD, closedTime,  # symbol, quantity, sell_threshold, purchase_time,
-                                                        None, filled_price, 0, None, False, closedTime]
+                    self.trade_history.loc[order_id] = [symbol, quantity, MIN_THRESHOLD, closed_time,  # symbol, quantity, sell_threshold, purchase_time,
+                                                        None, filled_price, 0, None, False, closed_time]
                     self.db.document(symbol).collection("trade_history").document(order_id).set(
                         {"quantity": quantity, "purchase_filled_price": filled_price,
                          "purchase_limit_price": limit_price,
-                         "purchase_time": closedTime, "status": None, "sell_threshold": min_threshold,
-                         "latest_update": closedTime}, merge=True)
+                         "purchase_time": closed_time, "status": None, "sell_threshold": min_threshold,
+                         "latest_update": closed_time}, merge=True)
 
                 # # When server restarts, order_changes will contain all orders that we will skip
                 # if closedTime < self.trade_history.at[order_id, "latest_update"]:
@@ -277,20 +279,20 @@ class MyStrategy(bt.Strategy):
                 # Update local and db copy of trade history
                 self.trade_history.at[order_id, "status"] = trade_status
                 self.trade_history.at[order_id, "purchase_price"] = filled_price
-                self.trade_history.at[order_id, "purchase_time"] = closedTime
-                self.trade_history.at[order_id, "latest_update"] = closedTime
+                self.trade_history.at[order_id, "purchase_time"] = closed_time
+                self.trade_history.at[order_id, "latest_update"] = closed_time
                 self.db.document(symbol).collection("trade_history").document(order_id).set(
                     {"purchase_filled_price": filled_price, "purchase_limit_price": limit_price,
-                     "purchase_time": closedTime, "status": trade_status, "latest_update": closedTime}, merge=True)
+                     "purchase_time": closed_time, "status": trade_status, "latest_update": closed_time}, merge=True)
 
             # Update local and db copy of orders, update db budget, send telegram message
             self.order_history.at[order_id, "status"] = order_status
             self.order_history.at[order_id, "price"] = filled_price
-            self.order_history.at[order_id, "opened_time"] = openedTime
-            self.order_history.at[order_id, "closed_time"] = closedTime
+            self.order_history.at[order_id, "opened_time"] = opened_time
+            self.order_history.at[order_id, "closed_time"] = closed_time
             self.db.document(symbol).collection("order_history").document(order_id).set(
-                {"filled_price": filled_price, "status": order_status, "opened_time": openedTime,
-                 "closed_time": closedTime}, merge=True)
+                {"filled_price": filled_price, "status": order_status, "opened_time": opened_time,
+                 "closed_time": closed_time}, merge=True)
             self.db.document("budget").set(
                 {"max_budget": self.budget.max_budget,
                  "remaining_budget": self.budget.remaining_budget}, merge=True)
@@ -305,123 +307,139 @@ class MyStrategy(bt.Strategy):
                     print(f"DB is de-synced with TradeStation\n"
                                                    f"DB says we own {tracked_quantity} shares of {symbol} "
                                                    f"but we actually own {actual_quantity} shares")
+                    return
             except Exception:
                 print(f"symbol {symbol} not found, likely no longer tracked ")
+                return
 
     def next(self):
 
-        symbol = self.symbol
-
-        print('date:{},close:{}'.format(self.data.datetime.time(0), self.data.close[0]))
 
         timee = firestore.SERVER_TIMESTAMP
 
-        import random
-        quantity = random.randint(0, 3)
-        threshold = random.uniform(0, 1/3)
 
         if not market_open_after_hours():
             print('Closed')
             return
 
-        else: 
-            print('Open')
-            if quantity == 0:
+        else:
 
-                open_trades = self.trade_history[(self.trade_history.symbol == self.symbol) & (self.trade_history.status == "own")]
+            for i, d in enumerate(self.datas):
 
+                symbol = d._name
 
-                if open_trades.empty:
-                    return
+                print('symbol:{}, date:{}, close:{}'.format(symbol, d.datetime.time(0), d.close[0]))
 
-                sell_prices = (1 + open_trades.sell_threshold) * open_trades.purchase_price
+                quantity = random.randint(0, 3)
+                threshold = random.uniform(0, 1/3)
 
-                new_trades_above_threshold = open_trades.loc[(sell_prices <= self.data.close[0]) & ~open_trades.above_threshold]
-                for trade_id in new_trades_above_threshold.index:
-                    self.trade_history.loc[trade_id, 'above_threshold'] = True
-                    self.db.document(self.symbol).collection("trade_history").document(trade_id).set(
-                        {"above_threshold": True}, merge=True)
+                print('Open')
+                if quantity == 0:
 
-                sell_trades = open_trades.loc[self.trade_history.above_threshold]
+                    open_trades = self.trade_history[(self.trade_history.symbol == symbol) & (self.trade_history.status == "own")]
 
-                if sell_trades.empty:
+                    if open_trades.empty:
+                        return
 
-                    return
+                    sell_prices = (1 + open_trades.sell_threshold) * open_trades.purchase_price
 
-                qty = sell_trades.quantity.sum()
+                    new_trades_above_threshold = open_trades.loc[(sell_prices <= d.close[0]) & ~open_trades.above_threshold]
 
-                response = self.trade_client.place_order(account_key=self.account_name, symbol=self.symbol, trade_action='SELL',
-                                                  quantity=qty, order_type="Market", duration="DAY")
-
-                if response:
-                    order_id = response['Orders'][0]['OrderID']
-
-                    for trade_id in sell_trades.index:
-                        self.trade_history.at[trade_id, "status"] = "sell_ordered"
-                        self.trade_history.at[trade_id, "sold_time"] = self.data.datetime.time(0)
-                        self.trade_history.at[trade_id, "latest_update"] = self.data.datetime.time(0)
-                        self.trade_history.at[trade_id, "sold_price"] = self.data.close[0]
-
-                        self.db.document(self.symbol).collection("trade_history").document(trade_id).set(
-                            {"sold_filled_price": 0, "sold_limit_price": self.data.close[0],
-                             "sold_time": timee, "status": "sell_ordered",
-                             "latest_update": timee}, merge=True)
-
-                    self.order_history.loc[order_id] = [symbol, qty, "sell", list(sell_trades.index),
-                                                        self.data.datetime.time(0), None, self.data.close[0], "ordered"]
-                    self.db.document(self.symbol).collection("order_history").document(order_id).set(
-                        {"quantity": qty, "type": "sell", "trade_ids": list(sell_trades.index),
-                         "filled_price": 0, 'limit_price': self.data.close[0], "time": timee,
-                         "status": "ordered"}, merge=True)
-                self.sell()
+                    for trade_id in new_trades_above_threshold.index:
+                        self.trade_history.loc[trade_id, 'above_threshold'] = True
+                        self.db.document(symbol).collection("trade_history").document(trade_id).set(
+                            {"above_threshold": True}, merge=True)
 
 
+                    sell_trades = open_trades.loc[self.trade_history.above_threshold]
 
-            else:
+                    if sell_trades.empty:
 
-                response = self.trade_client.place_order(account_key=self.account_name, symbol=self.symbol, trade_action='BUY',
-                                                      quantity=quantity, order_type="Market", duration="DAY")
-                print(response)
+                        return
 
-                if response:
+                    qty = sell_trades.quantity.sum()
 
-                    order_id = response['Orders'][0]['OrderID']
+                    response = self.trade_client.place_order(account_key=self.account_name, symbol=symbol, trade_action='SELL',
+                                                      quantity=qty, order_type="Market", duration="DAY")
 
-                    status = "purchase_ordered"
-                    self.budget.update_remaining_budget(-self.data.close[0]*quantity, self.trade_station)
-                    self.db.document("budget").set(
-                        {"remaining_budget": self.budget.remaining_budget}, merge=True)
+                    if response:
+                        order_id = response['Orders'][0]['OrderID']
 
-                    # Update local and db copies of order history
-                    self.order_history.loc[order_id] = [symbol, quantity, "buy", None, self.data.datetime.time(0), None, self.data.close[0], status]
-                    self.db.document(symbol).collection("order_history").document(order_id).set(
-                        {"quantity": quantity, "type": "buy", "filled_price": 0, 'limit_price': self.data.close[0],
-                         "time": timee, "status": status}, merge=True)
 
-                    # Update local and db copies of trade history
-                    # symbol, quantity, sell_threshold, purchase_time,
-                    # sold_time, purchase_price, sold_price, status, latest_update
-                    self.trade_history.loc[order_id] = [self.symbol, quantity, threshold, self.data.datetime.time(0),
-                                                        None, self.data.close[0], 0, status, False, self.data.datetime.time(0)]
-                    self.db.document(symbol).collection("trade_history").document(order_id).set(
-                        {"quantity": quantity, "purchase_filled_price": 0, "purchase_limit_price": self.data.close[0],
-                         "purchase_time": timee, "status": status, "sell_threshold": threshold,
-                         "latest_update": timee, "above_threshold": False}, merge=True)
-                self.buy()
+                        for trade_id in sell_trades.index:
+                            self.trade_history.at[trade_id, "status"] = "sell_ordered"
+                            self.trade_history.at[trade_id, "sold_time"] = d.datetime.time(0)
+                            self.trade_history.at[trade_id, "latest_update"] = d.datetime.time(0)
+                            self.trade_history.at[trade_id, "sold_price"] = d.close[0]
+
+                            self.db.document(self.symbol).collection("trade_history").document(trade_id).set(
+                                {"sold_filled_price": 0, "sold_limit_price": d.close[0],
+                                 "sold_time": timee, "status": "sell_ordered",
+                                 "latest_update": timee}, merge=True)
+
+                        self.order_history.loc[order_id] = [symbol, qty, "sell", list(sell_trades.index),
+                                                            d.datetime.time(0), None, d.close[0], "ordered"]
+                        self.db.document(symbol).collection("order_history").document(order_id).set(
+                            {"quantity": qty, "type": "sell", "trade_ids": list(sell_trades.index),
+                             "filled_price": 0, 'limit_price': close[0], "time": timee,
+                             "status": "ordered"}, merge=True)
+                        sell_trades = open_trades.loc[self.trade_history.above_threshold]
+                    self.sell()
+
+
+
+                else:
+
+                    response = self.trade_client.place_order(account_key=self.account_name, symbol=symbol, trade_action='BUY',
+                                                          quantity=quantity, order_type="Market", duration="DAY")
+
+                    if response:
+
+                        order_id = response['Orders'][0]['OrderID']
+
+                        status = "purchase_ordered"
+                        self.budget.update_remaining_budget(-d.close[0]*quantity, self.trade_station)
+                        self.db.document("budget").set(
+                            {"remaining_budget": self.budget.remaining_budget}, merge=True)
+
+                        # Update local and db copies of order history
+                        self.order_history.loc[order_id] = [symbol, quantity, "buy", None, d.datetime.time(0), None, d.close[0], status]
+                        self.db.document(symbol).collection("order_history").document(order_id).set(
+                            {"quantity": quantity, "type": "buy", "filled_price": 0, 'limit_price': d.close[0],
+                             "time": timee, "status": status}, merge=True)
+
+                        # Update local and db copies of trade history
+                        # symbol, quantity, sell_threshold, purchase_time,
+                        # sold_time, purchase_price, sold_price, status, latest_update
+                        self.trade_history.loc[order_id] = [symbol, quantity, threshold, d.datetime.time(0),
+                                                            None, d.close[0], 0, status, False, d.datetime.time(0)]
+                        self.db.document(symbol).collection("trade_history").document(order_id).set(
+                            {"quantity": quantity, "purchase_filled_price": 0, "purchase_limit_price": d.close[0],
+                             "purchase_time": timee, "status": status, "sell_threshold": threshold,
+                             "latest_update": timee, "above_threshold": False}, merge=True)
+                    self.buy()
+
+                self.synchronize_broker_with_db()
 
 
 
 if __name__ == '__main__':
-  
-  symbols =['AAPL']
-  cerebro = bt.Cerebro() 
 
-  for s in symbols:
-    strat_params = {'symbol': s, 'details': clients['Paper']}
-    #, symbol = s, details = clients['Paper']
-    data = TradeStationData(strat_params, symbol = s, details = clients['Paper'])
-    sleep(0.001)
-    cerebro.adddata(data)
-    cerebro.addstrategy(MyStrategy, strat_params, symbol = s, details = clients['Paper'])
+    symbols =['AAPL', 'GOOGL']
+    cerebro = bt.Cerebro()
 
-  cerebro.run()
+    #cerebro.broker.setcash(234560.0) set budget
+    #cerebro.broker.setcommission(commission=0.001)
+
+    for s in symbols:
+
+        strat_params = {'symbol': s, 'details': clients['Paper']}
+        #, symbol = s, details = clients['Paper']
+        data = TradeStationData(strat_params, symbol = s, details = clients['Paper'])
+        sleep(0.001)
+        cerebro.adddata(data, name=s)
+        cerebro.addstrategy(MyStrategy, strat_params, symbol = s, details = clients['Paper'])
+
+        #cerebro.broker.getvalue() to get the new budget
+
+    cerebro.run()
