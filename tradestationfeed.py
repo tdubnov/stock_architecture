@@ -321,7 +321,6 @@ class MyStrategy(bt.Strategy):
 
 
         if not market_open_after_hours():
-            print('Closed')
             return
 
         else:
@@ -334,8 +333,6 @@ class MyStrategy(bt.Strategy):
 
                 quantity = random.randint(0, 3)
                 threshold = random.uniform(0, 1/3)
-
-                print('Open')
                 if quantity == 0:
 
                     open_trades = self.trade_history[(self.trade_history.symbol == symbol) & (self.trade_history.status == "own")]
