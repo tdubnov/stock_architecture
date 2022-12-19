@@ -233,12 +233,13 @@ class MyStrategy(bt.Strategy):
 
             else:  # Buy order
                 if order_id not in self.trade_history.index:
+                    MIN_THRESHOLD = 0
                     self.trade_history.loc[order_id] = [symbol, quantity, MIN_THRESHOLD, closed_time,  # symbol, quantity, sell_threshold, purchase_time,
                                                         None, filled_price, 0, None, False, closed_time]
                     self.db.document(symbol).collection("trade_history").document(order_id).set(
                         {"quantity": quantity, "purchase_filled_price": filled_price,
                          "purchase_limit_price": limit_price,
-                         "purchase_time": closed_time, "status": None, "sell_threshold": min_threshold,
+                         "purchase_time": closed_time, "status": None, "sell_threshold": MIN_THRESHOLD,
                          "latest_update": closed_time}, merge=True)
 
                 # # When server restarts, order_changes will contain all orders that we will skip
