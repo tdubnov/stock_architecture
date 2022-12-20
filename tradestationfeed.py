@@ -373,10 +373,9 @@ if __name__ == '__main__':
         sleep(0.001)
         cerebro.adddata(data, name=s)
         cerebro.addstrategy(MyStrategy, strat_params, symbol = s, details = clients['Paper'])
+        cerebro.addanalyzer(bt.analyzers.SharpeRatio)
 
         #cerebro.broker.getvalue()
 
-    result = cerebro.run()
-    bo = Bokeh()
-    browser = OptBrowser(bo, result)
-    browser.start()
+    cerebro.run()
+    cerebro.plot()
