@@ -11,7 +11,6 @@ from Tradestation_python_api.ts.client import TradeStationClient
 from helper import create_logger
 import sys
 import firebase_admin
-from backtrader_plotting import Bokeh
 from firebase_admin import credentials, firestore, initialize_app
 #logger = create_logger(file=f'{sys.argv[1].replace(" ", "_")}_log.log')
 import signal
@@ -30,6 +29,7 @@ import json
 from pqdm.threads import pqdm
 from multiprocess import Pool
 import random
+from backtrader_plotting import Bokeh
 
 from config import clients
 from tradestation import TradeStation
@@ -47,7 +47,7 @@ from DataClass import TradeStationData
 class MyStrategy(bt.Strategy):
     params = (
         ('symbol', 'GOOGL'),
-        ('details', clients['Paper'])
+        ('details', clients['Paper']),
     )
 
     def __init__(self, args):
@@ -69,84 +69,18 @@ class MyStrategy(bt.Strategy):
 
         self.account_name = [account['Name'] for account in self.trade_client.get_accounts(details['Username']) if account['TypeDescription'] == details['AccountType']][0]
 
-        if not firebase_admin._apps:
-            cred = credentials.Certificate('./firestore_key.json')
-            initialize_app(cred)
-        self.db = firestore.client().collection(self.trade_station.account_name)
-
         self.budget = Budget()
-        self.trade_history = pd.DataFrame(columns=TRADE_HISTORY_COLUMNS + ["latest_update"])
-        self.temp_trade_history = {}
-        self.temp_order_history = {}
-        self.trade_history = pd.DataFrame(columns=TRADE_HISTORY_COLUMNS + ["latest_update"])
-        self.order_history = pd.DataFrame(columns=ORDER_HISTORY_COLUMNS)
-        self.read_db()
+        tsd = TradeStationData(self.symbol)
+        self.db = tsd.db
+        tsd.read_db()
 
-
-    def read_db(self):
-        print('Reading db')
-        budget_info = self.db.document("budget").get().to_dict()
-        self.budget.max_budget = budget_info["max_budget"]
-        self.budget.remaining_budget = budget_info["remaining_budget"]
-        self.budget.starting_budget = budget_info["starting_budget"]
-
-        pqdm(self.db.list_documents(), self.get_document_info, n_jobs=10)
-        self.trade_history = pd.DataFrame.from_dict(self.temp_trade_history, orient='index', columns=TRADE_HISTORY_COLUMNS + ["latest_update"])
-        self.order_history = pd.DataFrame.from_dict(self.temp_order_history, orient='index', columns=ORDER_HISTORY_COLUMNS)
-        print(f'Finished reading db:'            
-              f'\n\nTrade history from DB:'
-              f'\n{self.trade_history.to_string()}'
-                
-              f'\n\nOrder history from DB:'
-              f'\n{self.order_history.to_string()}')
-        self.trade_history = self.trade_history.sort_values(by='purchase_time')
-
-    def get_document_info(self, document):
-        if document.id == 'budget':  # or document.id not in symbols:
-            return
-
-        for trade in document.collection("trade_history").list_documents():
-            info = trade.get().to_dict()
-            quantity = info["quantity"]
-            sell_threshold = info["sell_threshold"]
-            purchase_time = info["purchase_time"].astimezone(TIMEZONE)
-            sold_time = info["sold_time"].astimezone(TIMEZONE) if "sold_time" in info else None
-            latest_update = info["latest_update"].astimezone(TIMEZONE)
-
-            purchase_price = info["purchase_filled_price"]
-            sold_price = info.get("sold_filled_price", 0)
-            status = info["status"]
-            above_threshold = info.get("above_threshold", False)
-            try:
-                row = {'symbol': document.id, 'quantity': quantity, 'sell_threshold': sell_threshold,
-                       'purchase_time': purchase_time, 'sold_time': sold_time, 'purchase_price': purchase_price,
-                       'sold_price': sold_price, 'status': status, 'above_threshold': above_threshold,
-                       'latest_update': latest_update}
-                self.temp_trade_history[trade.id] = row
-
-            except Exception as e:
-                print(f"Error reading Trade History of {document.id}:{trade.id}")
-
-
-        for order in document.collection("order_history").list_documents():
-            try:
-                info = order.get().to_dict()
-                quantity = info["quantity"]
-                order_type = info["type"]
-                opened_time = None if "opened_time" not in info else info["opened_time"].astimezone(TIMEZONE)
-                closed_time = None if "closed_time" not in info else info["closed_time"].astimezone(TIMEZONE)
-                trade_ids = info.get("trade_ids", [])
-                price = info["filled_price"]
-                status = info["status"]
-
-                row = {'symbol': document.id, 'quantity': quantity, 'type': order_type, 'trade_ids': trade_ids,
-                       'opened_time': opened_time, 'closed_time': closed_time, 'price': price, 'status': status}
-                self.temp_order_history[order.id] = row
-
-            except Exception as e:
-                print(f"Error reading Order History of {document.id}:{order.id}")
-
-
+        
+        #self.trade_history = pd.DataFrame(columns=TRADE_HISTORY_COLUMNS + ["latest_update"])
+        #self.temp_trade_history = {}
+        #self.temp_order_history = {}
+        self.trade_history = tsd.trade_history
+        self.order_history = tsd.order_history
+        #self.read_db()
 
     def synchronize_broker_with_db(self):
         self.trade_station.get_account_updates()
@@ -229,7 +163,7 @@ class MyStrategy(bt.Strategy):
                     self.db.document(symbol).collection("trade_history").document(trade_id).set(
                         {"sold_filled_price": filled_price, "sold_limit_price": limit_price,
                          "sold_time": closedTime, "status": trade_status, "latest_update": closedTime}, merge=True)
-                
+
 
             else:  # Buy order
                 if order_id not in self.trade_history.index:
@@ -314,6 +248,7 @@ class MyStrategy(bt.Strategy):
                 print(f"symbol {symbol} not found, likely no longer tracked ")
                 return
 
+
     def next(self):
 
 
@@ -329,7 +264,7 @@ class MyStrategy(bt.Strategy):
 
                 symbol = d._name
 
-                print('symbol:{}, date:{}, close:{}'.format(symbol, d.datetime.time(0), d.close[0]))
+                print('symbol:{}, date:{}, close:{}'.format(symbol, d.datetime(0), d.close[0]))
 
                 quantity = random.randint(0, 3)
                 threshold = random.uniform(0, 1/3)
@@ -367,8 +302,8 @@ class MyStrategy(bt.Strategy):
 
                         for trade_id in sell_trades.index:
                             self.trade_history.at[trade_id, "status"] = "sell_ordered"
-                            self.trade_history.at[trade_id, "sold_time"] = d.datetime.time(0)
-                            self.trade_history.at[trade_id, "latest_update"] = d.datetime.time(0)
+                            self.trade_history.at[trade_id, "sold_time"] = d.datetime(0)
+                            self.trade_history.at[trade_id, "latest_update"] = d.datetime(0)
                             self.trade_history.at[trade_id, "sold_price"] = d.close[0]
 
                             self.db.document(self.symbol).collection("trade_history").document(trade_id).set(
@@ -377,7 +312,7 @@ class MyStrategy(bt.Strategy):
                                  "latest_update": timee}, merge=True)
 
                         self.order_history.loc[order_id] = [symbol, qty, "sell", list(sell_trades.index),
-                                                            d.datetime.time(0), None, d.close[0], "ordered"]
+                                                            d.datetime(0), None, d.close[0], "ordered"]
                         self.db.document(symbol).collection("order_history").document(order_id).set(
                             {"quantity": qty, "type": "sell", "trade_ids": list(sell_trades.index),
                              "filled_price": 0, 'limit_price': close[0], "time": timee,
@@ -402,7 +337,7 @@ class MyStrategy(bt.Strategy):
                             {"remaining_budget": self.budget.remaining_budget}, merge=True)
 
                         # Update local and db copies of order history
-                        self.order_history.loc[order_id] = [symbol, quantity, "buy", None, d.datetime.time(0), None, d.close[0], status]
+                        self.order_history.loc[order_id] = [symbol, quantity, "buy", None, d.datetime(0), None, d.close[0], status]
                         self.db.document(symbol).collection("order_history").document(order_id).set(
                             {"quantity": quantity, "type": "buy", "filled_price": 0, 'limit_price': d.close[0],
                              "time": timee, "status": status}, merge=True)
@@ -410,8 +345,8 @@ class MyStrategy(bt.Strategy):
                         # Update local and db copies of trade history
                         # symbol, quantity, sell_threshold, purchase_time,
                         # sold_time, purchase_price, sold_price, status, latest_update
-                        self.trade_history.loc[order_id] = [symbol, quantity, threshold, d.datetime.time(0),
-                                                            None, d.close[0], 0, status, False, d.datetime.time(0)]
+                        self.trade_history.loc[order_id] = [symbol, quantity, threshold, d.datetime(0),
+                                                            None, d.close[0], 0, status, False, d.datetime(0)]
                         self.db.document(symbol).collection("trade_history").document(order_id).set(
                             {"quantity": quantity, "purchase_filled_price": 0, "purchase_limit_price": d.close[0],
                              "purchase_time": timee, "status": status, "sell_threshold": threshold,
@@ -425,22 +360,23 @@ class MyStrategy(bt.Strategy):
 if __name__ == '__main__':
 
     symbols =['AAPL', 'GOOGL']
-    cerebro = bt.Cerebro()
+    cerebro = bt.Cerebro(maxcpus=2)
 
-    #cerebro.broker.setcash(234560.0) set budget
+    #cerebro.broker.setcash(234560.0)
     #cerebro.broker.setcommission(commission=0.001)
 
     for s in symbols:
 
-        strat_params = {'symbol': s, 'details': clients['Paper']}
+        strat_params = {'symbol': s, 'details': clients['Paper'],}
         #, symbol = s, details = clients['Paper']
         data = TradeStationData(strat_params, symbol = s, details = clients['Paper'])
         sleep(0.001)
         cerebro.adddata(data, name=s)
         cerebro.addstrategy(MyStrategy, strat_params, symbol = s, details = clients['Paper'])
 
-        #cerebro.broker.getvalue() to get the new budget
+        #cerebro.broker.getvalue()
 
-    cerebro.run()
-    b = Bokeh(style='bar', plot_mode='single')
-    cerebro.plot(b)
+    result = cerebro.run()
+    bo = Bokeh()
+    browser = OptBrowser(bo, result)
+    browser.start()
