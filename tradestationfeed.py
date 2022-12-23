@@ -315,7 +315,7 @@ class MyStrategy(bt.Strategy):
                                                             d.datetime(0), None, d.close[0], "ordered"]
                         self.db.document(symbol).collection("order_history").document(order_id).set(
                             {"quantity": qty, "type": "sell", "trade_ids": list(sell_trades.index),
-                             "filled_price": 0, 'limit_price': close[0], "time": timee,
+                             "filled_price": 0, 'limit_price': d.close[0], "time": timee,
                              "status": "ordered"}, merge=True)
                         sell_trades = open_trades.loc[self.trade_history.above_threshold]
                     self.sell()
