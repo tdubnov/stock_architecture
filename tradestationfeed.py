@@ -264,7 +264,7 @@ class MyStrategy(bt.Strategy):
 
                 symbol = d._name
 
-                print('symbol:{}, date:{}, close:{}'.format(symbol, d.datetime(0), d.close[0]))
+                print('symbol:{}, date:{}, close:{}'.format(symbol, d.datetime.date(0), d.close[0]))
 
                 quantity = random.randint(0, 3)
                 threshold = random.uniform(0, 1/3)
@@ -298,12 +298,13 @@ class MyStrategy(bt.Strategy):
 
                     if response:
                         order_id = response['Orders'][0]['OrderID']
+                        print(order_id)
 
 
                         for trade_id in sell_trades.index:
                             self.trade_history.at[trade_id, "status"] = "sell_ordered"
-                            self.trade_history.at[trade_id, "sold_time"] = d.datetime(0)
-                            self.trade_history.at[trade_id, "latest_update"] = d.datetime(0)
+                            self.trade_history.at[trade_id, "sold_time"] = d.datetime.date(0)
+                            self.trade_history.at[trade_id, "latest_update"] = d.datetime.date(0)
                             self.trade_history.at[trade_id, "sold_price"] = d.close[0]
 
                             self.db.document(self.symbol).collection("trade_history").document(trade_id).set(
@@ -312,7 +313,7 @@ class MyStrategy(bt.Strategy):
                                  "latest_update": timee}, merge=True)
 
                         self.order_history.loc[order_id] = [symbol, qty, "sell", list(sell_trades.index),
-                                                            d.datetime(0), None, d.close[0], "ordered"]
+                                                            d.datetime.date(0), None, d.close[0], "ordered"]
                         self.db.document(symbol).collection("order_history").document(order_id).set(
                             {"quantity": qty, "type": "sell", "trade_ids": list(sell_trades.index),
                              "filled_price": 0, 'limit_price': d.close[0], "time": timee,
@@ -337,7 +338,7 @@ class MyStrategy(bt.Strategy):
                             {"remaining_budget": self.budget.remaining_budget}, merge=True)
 
                         # Update local and db copies of order history
-                        self.order_history.loc[order_id] = [symbol, quantity, "buy", None, d.datetime(0), None, d.close[0], status]
+                        self.order_history.loc[order_id] = [symbol, quantity, "buy", None, d.datetime.date(0), None, d.close[0], status]
                         self.db.document(symbol).collection("order_history").document(order_id).set(
                             {"quantity": quantity, "type": "buy", "filled_price": 0, 'limit_price': d.close[0],
                              "time": timee, "status": status}, merge=True)
@@ -345,8 +346,8 @@ class MyStrategy(bt.Strategy):
                         # Update local and db copies of trade history
                         # symbol, quantity, sell_threshold, purchase_time,
                         # sold_time, purchase_price, sold_price, status, latest_update
-                        self.trade_history.loc[order_id] = [symbol, quantity, threshold, d.datetime(0),
-                                                            None, d.close[0], 0, status, False, d.datetime(0)]
+                        self.trade_history.loc[order_id] = [symbol, quantity, threshold, d.datetime.date(0),
+                                                            None, d.close[0], 0, status, False, d.datetime.date(0)]
                         self.db.document(symbol).collection("trade_history").document(order_id).set(
                             {"quantity": quantity, "purchase_filled_price": 0, "purchase_limit_price": d.close[0],
                              "purchase_time": timee, "status": status, "sell_threshold": threshold,
@@ -354,7 +355,6 @@ class MyStrategy(bt.Strategy):
                     self.buy()
 
                 self.synchronize_broker_with_db()
-
 
 
 if __name__ == '__main__':
