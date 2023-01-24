@@ -1,7 +1,0 @@
-README.md
-setup.py
-tradestation_python_api.egg-info/PKG-INFO
-tradestation_python_api.egg-info/SOURCES.txt
-tradestation_python_api.egg-info/dependency_links.txt
-tradestation_python_api.egg-info/requires.txt
-tradestation_python_api.egg-info/top_level.txt
