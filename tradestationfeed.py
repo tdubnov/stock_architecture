@@ -48,14 +48,21 @@ UNDERLINE_END = '</u>'
 TELEGRAM_INDENT = "   "
 
 symboll = ""
-
+socket = socket.socket()
+vari = False
+var = False
+trd_hist = None
+ord_hist = None
 class MyStrategy(bt.Strategy):
     params = (
         ('symbol', 'GOOGL'),
         ('details', clients['Paper']),
     )
 
+
     def __init__(self, *args):
+
+        global vari, var, trd_hist, ord_hist, socket
 
         details = self.p.details
         self.symbol = self.p.symbol
@@ -77,22 +84,23 @@ class MyStrategy(bt.Strategy):
         self.budget = Budget()
         tsd = TradeStationData(self.symbol)
         self.db = tsd.db
-        tsd.read_db()
+
+        if not vari:
+            tsd.read_db()
+            trd_hist = tsd.trade_history
+            ord_hist = tsd.order_history
+            vari = True
 
         
         #self.trade_history = pd.DataFrame(columns=TRADE_HISTORY_COLUMNS + ["latest_update"])
         #self.temp_trade_history = {}
         #self.temp_order_history = {}
-        self.trade_history = tsd.trade_history
-        self.order_history = tsd.order_history
+        self.trade_history = trd_hist
+        self.order_history = ord_hist
         #self.read_db()
 
-        tn  = telegram_integration.TelegramNotification(self.symbol, self.order_history, self.trade_history, self.db)
-        telegram_bot_thread = threading.Thread(target=tn.listen_to_server)
-        telegram_bot_thread.daemon = False
-
-        telegram_bot_thread.start()
-        tn.send_telegram_message(message=f"{UNDERLINE_START}Server Started Running{UNDERLINE_END}")
+        self.tn  = telegram_integration.TelegramNotification(self.symbol, self.order_history, self.trade_history, self.db, var, socket)
+        var = True
 
     @classmethod
     def ret_symbol(self):
@@ -278,7 +286,7 @@ class MyStrategy(bt.Strategy):
             self.db.document("budget").set(
                 {"max_budget": self.budget.max_budget,
                  "remaining_budget": self.budget.remaining_budget}, merge=True)
-            tn.send_telegram_message(message=telegram_message, order=True)
+            self.tn.send_telegram_message(message=telegram_message, order=True)
 
         # Check if trade history is de-synced
         open_trades = self.trade_history[self.trade_history.status.isin(["own", "sell_ordered", "sell_order_received"])]
@@ -287,7 +295,7 @@ class MyStrategy(bt.Strategy):
             try:
                 actual_quantity = self.trade_station.positions[symbol]['Quantity']
                 if actual_quantity != tracked_quantity:
-                    tn.send_telegram_message(message=f"DB is de-synced with TradeStation\n"
+                    self.tn.send_telegram_message(message=f"DB is de-synced with TradeStation\n"
                                                    f"DB says we own {tracked_quantity} shares of {symbol} "
                                                    f"but we actually own {actual_quantity} shares")
                     return
@@ -345,8 +353,8 @@ class MyStrategy(bt.Strategy):
 
                     if response:
                         order_id = response['Orders'][0]['OrderID']
-                        tn.send_telegram_message(message=f'Sent order ({order_id}): {response["Message"][12:]}', order=True)
-                        print(order_id)
+                        response1 = response['Orders'][0]
+                        self.tn.send_telegram_message(message=f'Sent order ({order_id}): {response1["Message"][12:]}', order=True)
 
 
                         for trade_id in sell_trades.index:
@@ -362,6 +370,8 @@ class MyStrategy(bt.Strategy):
 
                         self.order_history.loc[order_id] = [symbol, qty, "sell", list(sell_trades.index),
                                                             d.datetime.date(0), None, d.close[0], "ordered"]
+
+                        print(list(sell_trades.index))
                         self.db.document(symbol).collection("order_history").document(order_id).set(
                             {"quantity": qty, "type": "sell", "trade_ids": list(sell_trades.index),
                              "filled_price": 0, 'limit_price': d.close[0], "time": timee,
@@ -377,9 +387,9 @@ class MyStrategy(bt.Strategy):
                                                           quantity=quantity, order_type="Market", duration="DAY")
 
                     if response:
-
                         order_id = response['Orders'][0]['OrderID']
-                        tn.send_telegram_message(message=f'Sent order ({order_id}): {response["Message"][12:]}', order=True)
+                        response1 = response['Orders'][0]
+                        self.tn.send_telegram_message(message=f'Sent order ({order_id}): {response1["Message"][12:]}', order=True)
 
                         status = "purchase_ordered"
                         self.budget.update_remaining_budget(-d.close[0]*quantity, self.trade_station)
