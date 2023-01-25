@@ -91,7 +91,6 @@ class MyStrategy(bt.Strategy):
             ord_hist = tsd.order_history
             vari = True
 
-        
         #self.trade_history = pd.DataFrame(columns=TRADE_HISTORY_COLUMNS + ["latest_update"])
         #self.temp_trade_history = {}
         #self.temp_order_history = {}
