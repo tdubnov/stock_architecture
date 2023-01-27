@@ -22,9 +22,7 @@ TELEGRAM_INDENT = "   "
 
 class TelegramNotification(object):
     
-    def __init__(self, symbol, orders_hist, trade_hist, db,  var, socket):
-        strat_params = {'symbol': symbol, 'details': clients['Paper'],}
-        symbol = symbol
+    def __init__(self, orders_hist, trade_hist, db,  var, socket):
         self.order_history = orders_hist
         self.trade_history = trade_hist
         self.socket = socket
@@ -101,7 +99,7 @@ class TelegramNotification(object):
             if order_id in self.order_history.index and order_status == self.order_history.at[order_id, "status"] and symbol_latest_status != 'sell_ordered':
                 continue
             if order_status == "filled" and symbol_latest_status != 'sold':
-                self.order_history.loc[order_id] = [self.symbol, quantity, order_type, [], opened_time, closed_time, filled_price, order_status]
+                self.order_history.loc[order_id] = [symbol, quantity, order_type, [], opened_time, closed_time, filled_price, order_status]
                 self.db.document(symbol).collection("order_history").document(order_id).set(
                     {"quantity": quantity, "type": order_type.lower(),
                      "filled_price": filled_price, "limit_price": limit_price,
