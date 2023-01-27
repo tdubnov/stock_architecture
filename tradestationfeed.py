@@ -66,7 +66,7 @@ class MyStrategy(bt.Strategy):
 
         details = self.p.details
         self.symbol = self.p.symbol
-        print(details, self.symbol)
+        print(self.symbol)
         self.trade_client = TradeStationClient(
             username=details['Username'],
             client_id=details['ClientId'],
