@@ -197,14 +197,12 @@ class TradeStationData(bt.feed.DataBase):
                     curr_price = round(close, 2)
                     print(f'New price at {curr_time} - {symbol}: ${curr_price}')
 
-                    print(curr_price, bt.date2num(pd.to_datetime(curr_time)), float(decoded_line['High']), float(decoded_line['Low']), float(decoded_line['Volume']))
                     self.lines.close[0] = curr_price
                     self.lines.datetime[0] = bt.date2num(pd.to_datetime(curr_time))
                     self.lines.high[0] = float(decoded_line['High'])
                     self.lines.low[0] = float(decoded_line['Low'])
                     self.lines.volume[0] = float(decoded_line['Volume'])
-                    print(curr_price, bt.date2num(pd.to_datetime(curr_time)), float(decoded_line['High']), float(decoded_line['Low']), float(decoded_line['Volume']))
-
+                    
                     return True
         except requests.exceptions.ChunkedEncodingError:
             #logger.warning(f'Stream quotes chunked encoding error')
