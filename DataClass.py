@@ -173,6 +173,7 @@ class TradeStationData(bt.feed.DataBase):
             
             if time_till_open.total_seconds()>0:
                 #logger.info(f'Stream quotes thread sleeping for {time_till_open}')
+                print(f'Sleeping for {time_till_open.total_seconds()}')
                 sleep(time_till_open.total_seconds())
 
             with self.trade_station.ts_client.stream_quotes([self.symbol]) as stream:
