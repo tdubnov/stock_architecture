@@ -54,19 +54,12 @@ var = False
 trd_hist = None
 ord_hist = None
 class MyStrategy(bt.Strategy):
-    params = (
-        ('symbol', 'GOOGL'),
-        ('details', clients['Paper']),
-    )
-
 
     def __init__(self, *args):
 
         global vari, var, trd_hist, ord_hist, socket
 
-        details = self.p.details
-        self.symbol = self.p.symbol
-        print(self.symbol)
+        details = clients['Paper']
         self.trade_client = TradeStationClient(
             username=details['Username'],
             client_id=details['ClientId'],
@@ -81,14 +74,21 @@ class MyStrategy(bt.Strategy):
 
         self.account_name = [account['Name'] for account in self.trade_client.get_accounts(details['Username']) if account['TypeDescription'] == details['AccountType']][0]
 
-        self.budget = Budget()
-        tsd = TradeStationData(self.symbol)
-        self.db = tsd.db
+        if not firebase_admin._apps:
+            cred = credentials.Certificate('./firestore_key.json')
+            initialize_app(cred)
 
+        self.db = firestore.client().collection(self.trade_station.account_name)
+        self.budget = Budget()
         if not vari:
-            tsd.read_db()
-            trd_hist = tsd.trade_history
-            ord_hist = tsd.order_history
+            self.trade_history = pd.DataFrame(columns=TRADE_HISTORY_COLUMNS + ["latest_update"])
+            self.temp_trade_history = {}
+            self.temp_order_history = {}
+            self.trade_history = pd.DataFrame(columns=TRADE_HISTORY_COLUMNS + ["latest_update"])
+            self.order_history = pd.DataFrame(columns=ORDER_HISTORY_COLUMNS)
+            self.read_db()
+            trd_hist = self.trade_history
+            ord_hist = self.order_history
             vari = True
 
         #self.trade_history = pd.DataFrame(columns=TRADE_HISTORY_COLUMNS + ["latest_update"])
@@ -98,8 +98,71 @@ class MyStrategy(bt.Strategy):
         self.order_history = ord_hist
         #self.read_db()
 
-        self.tn  = telegram_integration.TelegramNotification(self.symbol, self.order_history, self.trade_history, self.db, var, socket)
+        self.tn  = telegram_integration.TelegramNotification(self.order_history, self.trade_history, self.db, var, socket)
         var = True
+
+    def read_db(self):
+        print('Reading db')
+        budget_info = self.db.document("budget").get().to_dict()
+        self.budget.max_budget = budget_info["max_budget"]
+        self.budget.remaining_budget = budget_info["remaining_budget"]
+        self.budget.starting_budget = budget_info["starting_budget"]
+
+        pqdm(self.db.list_documents(), self.get_document_info, n_jobs=10)
+        self.trade_history = pd.DataFrame.from_dict(self.temp_trade_history, orient='index', columns=TRADE_HISTORY_COLUMNS + ["latest_update"])
+        self.order_history = pd.DataFrame.from_dict(self.temp_order_history, orient='index', columns=ORDER_HISTORY_COLUMNS)
+        print(f'Finished reading db:'            
+              f'\n\nTrade history from DB:'
+              f'\n{self.trade_history.to_string()}'
+                
+              f'\n\nOrder history from DB:'
+              f'\n{self.order_history.to_string()}')
+        self.trade_history = self.trade_history.sort_values(by='purchase_time')
+
+    def get_document_info(self, document):
+        if document.id == 'budget':  # or document.id not in symbols:
+            return
+
+        for trade in document.collection("trade_history").list_documents():
+            info = trade.get().to_dict()
+            quantity = info["quantity"]
+            sell_threshold = info["sell_threshold"]
+            purchase_time = info["purchase_time"].astimezone(TIMEZONE)
+            sold_time = info["sold_time"].astimezone(TIMEZONE) if "sold_time" in info else None
+            latest_update = info["latest_update"].astimezone(TIMEZONE)
+
+            purchase_price = info["purchase_filled_price"]
+            sold_price = info.get("sold_filled_price", 0)
+            status = info["status"]
+            above_threshold = info.get("above_threshold", False)
+            try:
+                row = {'symbol': document.id, 'quantity': quantity, 'sell_threshold': sell_threshold,
+                       'purchase_time': purchase_time, 'sold_time': sold_time, 'purchase_price': purchase_price,
+                       'sold_price': sold_price, 'status': status, 'above_threshold': above_threshold,
+                       'latest_update': latest_update}
+                self.temp_trade_history[trade.id] = row
+
+            except Exception as e:
+                print(f"Error reading Trade History of {document.id}:{trade.id}")
+
+
+        for order in document.collection("order_history").list_documents():
+            try:
+                info = order.get().to_dict()
+                quantity = info["quantity"]
+                order_type = info["type"]
+                opened_time = None if "opened_time" not in info else info["opened_time"].astimezone(TIMEZONE)
+                closed_time = None if "closed_time" not in info else info["closed_time"].astimezone(TIMEZONE)
+                trade_ids = info.get("trade_ids", [])
+                price = info["filled_price"]
+                status = info["status"]
+
+                row = {'symbol': document.id, 'quantity': quantity, 'type': order_type, 'trade_ids': trade_ids,
+                       'opened_time': opened_time, 'closed_time': closed_time, 'price': price, 'status': status}
+                self.temp_order_history[order.id] = row
+
+            except Exception as e:
+                print(f"Error reading Order History of {document.id}:{order.id}")
 
     @classmethod
     def ret_symbol(self):
@@ -135,7 +198,7 @@ class MyStrategy(bt.Strategy):
             if order_id in self.order_history.index and order_status == self.order_history.at[order_id, "status"] and symbol_latest_status != 'sell_ordered':
                 continue
             if order_status == "filled" and symbol_latest_status != 'sold':
-                self.order_history.loc[order_id] = [self.symbol, quantity, order_type, [], opened_time, closed_time, filled_price, order_status]
+                self.order_history.loc[order_id] = [symbol, quantity, order_type, [], opened_time, closed_time, filled_price, order_status]
                 self.db.document(symbol).collection("order_history").document(order_id).set(
                     {"quantity": quantity, "type": order_type.lower(),
                      "filled_price": filled_price, "limit_price": limit_price,
@@ -310,6 +373,7 @@ class MyStrategy(bt.Strategy):
 
 
         if not market_open_after_hours():
+            print('Not market open after hours')
             return
 
         else:
@@ -362,7 +426,7 @@ class MyStrategy(bt.Strategy):
                             self.trade_history.at[trade_id, "latest_update"] = d.datetime.date(0)
                             self.trade_history.at[trade_id, "sold_price"] = d.close[0]
 
-                            self.db.document(self.symbol).collection("trade_history").document(trade_id).set(
+                            self.db.document(symbol).collection("trade_history").document(trade_id).set(
                                 {"sold_filled_price": 0, "sold_limit_price": d.close[0],
                                  "sold_time": timee, "status": "sell_ordered",
                                  "latest_update": timee}, merge=True)
@@ -370,7 +434,6 @@ class MyStrategy(bt.Strategy):
                         self.order_history.loc[order_id] = [symbol, qty, "sell", list(sell_trades.index),
                                                             d.datetime.date(0), None, d.close[0], "ordered"]
 
-                        print(list(sell_trades.index))
                         self.db.document(symbol).collection("order_history").document(order_id).set(
                             {"quantity": int(qty), "type": "sell", "trade_ids": list(sell_trades.index),
                              "filled_price": 0, 'limit_price': d.close[0], "time": timee,
@@ -415,8 +478,9 @@ class MyStrategy(bt.Strategy):
 
 if __name__ == '__main__':
 
-    symbols =['AAPL', 'GOOGL']
+    symbols = list(clients['Paper']['Symbols'])
     cerebro = bt.Cerebro(maxcpus=2)
+    cerebro.addstrategy(MyStrategy)
 
     #cerebro.broker.setcash(234560.0)
     #cerebro.broker.setcommission(commission=0.001)
@@ -429,8 +493,7 @@ if __name__ == '__main__':
         data = TradeStationData(strat_params, symbol = s, details = clients['Paper'])
         sleep(0.001)
         cerebro.adddata(data, name=s)
-        cerebro.addstrategy(MyStrategy, strat_params, symbol = s, details = clients['Paper'])
-        cerebro.addanalyzer(bt.analyzers.SharpeRatio)
+        #cerebro.addanalyzer(bt.analyzers.SharpeRatio)
 
         #cerebro.broker.getvalue()
 
