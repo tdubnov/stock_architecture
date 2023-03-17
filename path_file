@@ -1,0 +1,8 @@
+[2023-01-25 19:43:44,476 | __init__:281 | DEBUG | MainProcess] matplotlib data path: C:\Users\Ismail\AppData\Local\Programs\Python\Python311\Lib\site-packages\matplotlib\mpl-data
+[2023-01-25 19:43:44,486 | __init__:281 | DEBUG | MainProcess] CONFIGDIR=C:\Users\Ismail\.matplotlib
+[2023-01-25 19:43:44,496 | __init__:1466 | DEBUG | MainProcess] interactive is False
+[2023-01-25 19:43:44,505 | __init__:1467 | DEBUG | MainProcess] platform is win32
+[2023-01-25 19:43:55,246 | __init__:281 | DEBUG | MainProcess] matplotlib data path: C:\Users\Ismail\AppData\Local\Programs\Python\Python311\Lib\site-packages\matplotlib\mpl-data
+[2023-01-25 19:43:55,261 | __init__:281 | DEBUG | MainProcess] CONFIGDIR=C:\Users\Ismail\.matplotlib
+[2023-01-25 19:43:55,266 | __init__:1466 | DEBUG | MainProcess] interactive is False
+[2023-01-25 19:43:55,266 | __init__:1467 | DEBUG | MainProcess] platform is win32
