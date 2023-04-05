@@ -242,7 +242,8 @@ class YData(bt.feed.DataBase):
         self.symbol = self.p.symbol
         self.dict_rc = self.p.dict_rc
         self.dict_ind = self.p.dict_ind
-
+        
+    @property
     def add_ind(self):
         self.dict_rc[self.symbol] = self.dict_rc[self.symbol] + 1
 
