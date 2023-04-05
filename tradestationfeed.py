@@ -36,6 +36,7 @@ from tradestation import TradeStation
 from helper import CustomErrorHandler, market_open_regular_hours, market_open_after_hours, \
     datetime64_to_date, Budget, get_equity
 from email_helper import send_email
+from os.path import exists
 
 from constants import TRADE_HISTORY_COLUMNS, TIMEZONE, HOLIDAYS, FAILED_STATUSES, ALIVE_STATUSES, \
     ORDER_HISTORY_COLUMNS, FILLED_STATUSES, PARTIALLY_FILLED_STATUSES
@@ -81,8 +82,8 @@ class MyStrategy(bt.Strategy):
 
         self.db = firestore.client().collection(self.trade_station.account_name)
         self.budget = Budget()
+
         if not vari:
-            self.trade_history = pd.DataFrame(columns=TRADE_HISTORY_COLUMNS + ["latest_update"])
             self.temp_trade_history = {}
             self.temp_order_history = {}
             self.trade_history = pd.DataFrame(columns=TRADE_HISTORY_COLUMNS + ["latest_update"])
@@ -92,15 +93,15 @@ class MyStrategy(bt.Strategy):
             ord_hist = self.order_history
             vari = True
 
-        #self.trade_history = pd.DataFrame(columns=TRADE_HISTORY_COLUMNS + ["latest_update"])
-        #self.temp_trade_history = {}
-        #self.temp_order_history = {}
-        self.trade_history = trd_hist
-        self.order_history = ord_hist
-        #self.read_db()
+        else:
+            #self.temp_trade_history = {}
+            #self.temp_order_history = {}
+            self.trade_history = trd_hist
+            self.order_history = ord_hist
 
         self.tn  = telegram_integration.TelegramNotification(self.order_history, self.trade_history, self.db, var, socket)
         var = True
+
         signal.signal(signal.SIGINT, self.stop_trader)
 
     def read_db(self):
@@ -120,6 +121,10 @@ class MyStrategy(bt.Strategy):
               f'\n\nOrder history from DB:'
               f'\n{self.order_history.to_string()}')
         self.trade_history = self.trade_history.sort_values(by='purchase_time')
+
+    def save_update(self):
+        trd_hist = self.trade_history
+        ord_hist = self.order_history
 
     def get_document_info(self, document):
         if document.id == 'budget':  # or document.id not in symbols:
@@ -366,6 +371,7 @@ class MyStrategy(bt.Strategy):
             except Exception:
                 print(f"symbol {symbol} not found, likely no longer tracked ")
                 return
+        self.save_update()       
 
 
     def next(self):
@@ -481,6 +487,7 @@ class MyStrategy(bt.Strategy):
                              "purchase_time": timee, "status": status, "sell_threshold": threshold,
                              "latest_update": timee, "above_threshold": False}, merge=True)
                     self.buy()
+        self.save_update()
 
     def time_to_open(self):
 
@@ -508,20 +515,29 @@ class MyStrategy(bt.Strategy):
 if __name__ == '__main__':
 
     symbols = list(clients['Paper']['Symbols'])
+
+    dict_ind = {}
+    dict_rc = {}
+
+    for s in symbols:
+        dict_rc[s] = 0
+        tmp_data = pd.read_csv(s + '.csv')
+        dict_ind[s] =len(tmp_data)
+
     cerebro = bt.Cerebro(maxcpus=2)
     cerebro.addstrategy(MyStrategy)
+
     #cerebro.addwriter(bt.WriterFile, csv=True)
 
     #cerebro.broker.setcash(234560.0)
     #cerebro.broker.setcommission(commission=0.001)
 
     for s in symbols:
-
         strat_params = {'symbol': s}
         symboll = s
-        
         #, symbol = s, details = clients['Paper']
-        data = YData(strat_params, symbol = s)
+        data = YData(symbol = s, dict_rc = dict_rc, dict_ind = dict_ind)
+        data.add_ind()
         #data = bt.feeds.PandasData(dataname=data, name = s)
         sleep(0.001)
         cerebro.adddata(data, name=s)
