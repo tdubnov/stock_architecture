@@ -225,7 +225,7 @@ class TradeStationData(bt.feed.DataBase):
         pass
 
     def haslivedata(self):
-         return True
+        return True
 
     def islive(self):
         return True
@@ -233,46 +233,79 @@ class TradeStationData(bt.feed.DataBase):
 class YData(bt.feed.DataBase):
     params = (
         ('symbol', 'a'),
+        ('dict_rc', '{}'),
+        ('dict_ind', '{}')
         )
 
-    def __init__(self, args):
+    def __init__(self, *args, **kwargs):
         super(YData, self).__init__()
-
         self.symbol = self.p.symbol
+        self.dict_rc = self.p.dict_rc
+        self.dict_ind = self.p.dict_ind
+
+    def add_ind(self):
+        self.dict_rc[self.symbol] = self.dict_rc[self.symbol] + 1
 
     def _load(self):
 
+        if self.dict_rc[self.symbol] < self.dict_ind[self.symbol]:
 
-        try:
+            df = pd.read_csv(self.symbol + '.csv')
+            ind = self.dict_rc[self.symbol]-1
 
-            fd = yf.download(
-            tickers = self.symbol,
-            period = "1d",
-            progress=False
-            )
-            self.lines.close[0] = float(fd['Close'][-1])
-            self.lines.datetime[0] = bt.date2num(pd.to_datetime(fd.index[-1]))
-            self.lines.high[0] = float(fd['High'][-1])
-            self.lines.low[0] = float(fd['Low'][-1])
-            self.lines.volume[0] = float(fd['Volume'][-1])
+            #print(dict_rc[self.symbol], dict_ind[self.symbol])
+            #print('Local data')
+            print('Local Data:', float(df.loc[ind, "Close"]), pd.to_datetime(df.loc[ind, "Date"]),
+                float(df.loc[ind, "High"]), float(df.loc[ind, "Low"]),
+                float(df.loc[ind, "Volume"]))
 
-            if exists(self.symbol + '.csv'):
-                pd.read_csv(self.symbol + '.csv').append(fd).drop_duplicates().to_csv(self.symbol + '.csv')
-            else:
-                fd.to_csv(self.symbol + '.csv')
+
+            self.lines.close[0] = float(df.loc[ind, "Close"])
+            self.lines.datetime[0] = bt.date2num(pd.to_datetime(df.loc[ind, "Date"]))
+            self.lines.high[0] = float(df.loc[ind, "High"])
+            self.lines.low[0] = float(df.loc[ind, "Low"])
+            self.lines.volume[0] = float(df.loc[ind, "Volume"])
             return True
 
-        except:
+        else:
 
-            print('Error : Stream quotes stopped')
-            return
+            try:
+
+              fd = yf.download(
+                tickers = self.symbol,
+                period = "1d",
+                progress=False
+                )
+
+              #print("---Live Data---")
+              self.lines.close[0] = float(fd['Close'][-1])
+              self.lines.datetime[0] = bt.date2num(pd.to_datetime(fd.index[-1]))
+              self.lines.high[0] = float(fd['High'][-1])
+              self.lines.low[0] = float(fd['Low'][-1])
+              self.lines.volume[0] = float(fd['Volume'][-1])
+
+              fd['Date'] = fd.index
+
+              print('Live Data:', float(fd["Close"][-1]), pd.to_datetime(fd["Date"][-1]),
+                float(fd["High"][-1]), float(fd["Low"][-1]),
+                float(fd["Volume"][-1]))
+
+              if exists(self.symbol + '.csv'):
+                  pd.read_csv(self.symbol + '.csv').append(fd).drop_duplicates().to_csv(self.symbol + '.csv', index = False)
+              else:
+                  fd.to_csv(self.symbol + '.csv', index = False)
+              return True
+
+            except Exception as e:
+              print(f'Error : Stream quotes stopped, {str(e)}')
+              return
 
 
     def stop(self):
         pass
 
     def haslivedata(self):
-         return True
+        return True
 
     def islive(self):
         return True
