@@ -521,8 +521,11 @@ if __name__ == '__main__':
 
     for s in symbols:
         dict_rc[s] = 0
-        tmp_data = pd.read_csv(s + '.csv')
-        dict_ind[s] =len(tmp_data)
+        if exists(s + '.csv'):
+          tmp_data = pd.read_csv(s + '.csv')
+          dict_ind[s] = len(tmp_data)
+        else:
+          dict_ind[s] = 0
 
     cerebro = bt.Cerebro(maxcpus=2)
     cerebro.addstrategy(MyStrategy)
