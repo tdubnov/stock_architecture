@@ -249,7 +249,7 @@ class YData(bt.feed.DataBase):
 
     def _load(self):
 
-        if self.dict_rc[self.symbol] < self.dict_ind[self.symbol]:
+        if self.dict_rc[self.symbol] <= self.dict_ind[self.symbol]:
 
             df = pd.read_csv(self.symbol + '.csv')
             ind = self.dict_rc[self.symbol]-1
