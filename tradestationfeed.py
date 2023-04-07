@@ -540,7 +540,7 @@ if __name__ == '__main__':
         symboll = s
         #, symbol = s, details = clients['Paper']
         data = YData(symbol = s, dict_rc = dict_rc, dict_ind = dict_ind)
-        data.add_ind
+        #data.add_ind
         #data = bt.feeds.PandasData(dataname=data, name = s)
         sleep(0.001)
         cerebro.adddata(data, name=s)
